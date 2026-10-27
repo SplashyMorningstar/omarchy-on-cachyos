@@ -8,7 +8,6 @@ It verifies CachyOS, x86_64, Btrfs root, and a Snapper `root` config; adds the s
 
 - This is an experimental CachyOS adaptation, not an officially supported Omarchy installation method. A Btrfs root alone does not guarantee boot snapshots or a working rollback; test Snapper and keep a separate backup.
 - The official stable repository installs its **current stable** package set, not a historical version selected by this script. This makes it updateable through `omarchy update`, but does not guarantee it starts specifically at 4.0.5. Do not use raw `pacman -Syu` afterward to bypass Omarchy's update guard.
-- The original fastfetch screenshot indicates an AMD iGPU and KDE/SDDM. The script leaves KDE and SDDM in place, but session startup/provisioning must be verified on the actual machine before treating it as a daily-driver setup.
 
 ## Run
 
