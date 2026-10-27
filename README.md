@@ -1,6 +1,6 @@
 # Omarchy on CachyOS (experimental)
 
-An experimental way to try Omarchy on an existing CachyOS installation. This project is inspired by [mroboff/omarchy-on-cachyos](https://github.com/mroboff/omarchy-on-cachyos), but adapts its package-based setup for Omarchy 4. It installs Omarchy's official stable packages on top of CachyOS; it is **not** an official Omarchy installer or a replacement for installing from the official ISO.
+This README explains how to install, configure, troubleshoot, and uninstall Omarchy on CachyOS using this experimental adaptation. It is not an official Omarchy installation method.
 
 The installer configures Omarchy's signed stable package repository, performs a full system upgrade, installs Omarchy's base package set, backs up and applies the shipped defaults to the current user, and runs Omarchy's user-provisioning steps. It adds an Omarchy session to the login manager while leaving CachyOS and its existing desktop installed.
 
