@@ -81,12 +81,10 @@ fi
 
 [[ $EUID -ne 0 ]] || die 'Run as your regular user, not with sudo.'
 [[ $(uname -m) == x86_64 ]] || die 'This adaptation currently targets x86_64 CachyOS.'
+
 is_cachyos=false
-if [[ -f /etc/cachyos-release ]]; then
-  is_cachyos=true
-elif [[ -r /etc/os-release ]]; then
-  # CachyOS release files vary between installations; use the standard
-  # distribution identifiers as well as the CachyOS-specific marker.
+if [[ -r /etc/os-release ]]; then
+  # Detect CachyOS through the standard distribution identifiers.
   . /etc/os-release
   id_like=${ID_LIKE:-}
   if [[ ${ID:-} == cachyos || " ${id_like,,} " == *" cachyos "* ]]; then
@@ -96,7 +94,7 @@ fi
 if [[ $is_cachyos == false && -r /etc/lsb-release ]] && grep -Eiq '^(DISTRIB_ID|DISTRIB_DESCRIPTION)=.*cachy' /etc/lsb-release; then
   is_cachyos=true
 fi
-[[ $is_cachyos == true ]] || die 'CachyOS was not detected in /etc/cachyos-release, /etc/os-release, or /etc/lsb-release.'
+[[ $is_cachyos == true ]] || die 'CachyOS was not detected in /etc/os-release or /etc/lsb-release.'
 command -v pacman >/dev/null || die 'pacman is required.'
 command -v sudo >/dev/null || die 'sudo is required.'
 command -v btrfs >/dev/null || die 'btrfs-progs is required to verify the root filesystem.'
