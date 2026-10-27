@@ -12,6 +12,51 @@ readonly PACMAN_CONF="/etc/pacman.conf"
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
 
+sync_existing_user_configs() {
+  [[ $EUID -ne 0 ]] || die 'Run this as the regular desktop user, not with sudo.'
+  pacman -Q omarchy >/dev/null 2>&1 || die 'Omarchy is not installed yet.'
+  [[ -f /etc/skel/.config/hypr/hyprland.lua ]] || die 'Omarchy Hyprland defaults were not found in /etc/skel.'
+
+  cat <<'WARNING'
+This copies Omarchy's shipped defaults from /etc/skel into your existing home.
+Files with matching paths will be replaced. A backup of every existing file
+that would be replaced is made first. Your unrelated files are left in place.
+WARNING
+  read -r -p 'Type APPLY-OMARCHY-CONFIGS to continue: ' answer
+  [[ $answer == APPLY-OMARCHY-CONFIGS ]] || die 'Cancelled; no user files changed.'
+
+  local backup source relative destination
+  backup="$HOME/.local/backups/omarchy-configs-before-sync-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$backup"
+
+  while IFS= read -r -d '' source; do
+    relative=${source#/etc/skel/}
+    destination="$HOME/$relative"
+    if [[ -e $destination || -L $destination ]]; then
+      mkdir -p "$backup/$(dirname "$relative")"
+      cp -a "$destination" "$backup/$relative"
+    fi
+  done < <(find /etc/skel -mindepth 1 \( -type f -o -type l \) -print0)
+
+  cp -a /etc/skel/. "$HOME/"
+  printf 'Previous matching files backed up to: %s\n' "$backup"
+
+  if command -v omarchy-provision-user >/dev/null 2>&1; then
+    omarchy-provision-user
+  else
+    printf 'Warning: omarchy-provision-user is unavailable; user finalization was skipped.\n' >&2
+  fi
+
+  grep -q 'default.hypr.omarchy' "$HOME/.config/hypr/hyprland.lua" || die 'The copied Hyprland config does not appear to load Omarchy defaults.'
+  info 'Omarchy user defaults are now in place. Log out and select the Omarchy session in SDDM.'
+}
+
+if [[ ${1:-} == '--apply-user-configs' ]]; then
+  [[ $# -eq 1 ]] || die 'Usage: install-omarchy-on-cachyos.sh --apply-user-configs'
+  sync_existing_user_configs
+  exit 0
+fi
+
 [[ $EUID -ne 0 ]] || die 'Run as your regular user, not with sudo.'
 [[ $(uname -m) == x86_64 ]] || die 'This adaptation currently targets x86_64 CachyOS.'
 is_cachyos=false
@@ -109,12 +154,24 @@ fi
 sudo pacman -Syyu --needed "${pacman_args[@]}" omarchy
 
 trap - EXIT
+if [[ -r /usr/local/share/wayland-sessions/omarchy.desktop ]]; then
+  printf '\nOmarchy session entry found: /usr/local/share/wayland-sessions/omarchy.desktop\n'
+else
+  printf '\nWarning: the Omarchy SDDM session entry was not found under /usr/local/share/wayland-sessions.\n' >&2
+fi
+
+printf '\nThe existing user home is not automatically seeded from /etc/skel.\n'
+read -r -p 'Apply Omarchy defaults to this user now (backups will be made)? [y/N]: ' apply_configs
+if [[ ${apply_configs,,} == y || ${apply_configs,,} == yes ]]; then
+  sync_existing_user_configs
+else
+  printf 'Skipped user config sync. Later, run this script with --apply-user-configs.\n'
+fi
+
 cat <<'DONE'
 
 Omarchy packages are installed. KDE remains installed. Log out and select the
-Omarchy/Hyprland session in SDDM to try it. If the session is missing or
-first-login provisioning does not complete, return to KDE and do not disable
-SDDM or remove KDE; this CachyOS adaptation needs troubleshooting first.
+Omarchy session (not the generic CachyOS Hyprland session) in SDDM.
 
 For future Omarchy updates, use `omarchy update` from an Omarchy session.
 DONE

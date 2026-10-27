@@ -4,6 +4,8 @@ This installer is inspired by [mroboff/omarchy-on-cachyos](https://github.com/mr
 
 It verifies CachyOS, x86_64, Btrfs root, and a Snapper `root` config; adds the signed **stable** Omarchy package repository; then performs a full system upgrade while installing the `omarchy` package. Arch-based distributions require full upgrades rather than partial package upgrades. It does not format disks or remove KDE. It intentionally does not force a display-manager change or delete CachyOS packages. If the installed `cachyos-alacritty-config` package owns Omarchy's `/etc/skel` Alacritty template, pacman is allowed to replace only that template; the script does not remove the CachyOS package or alter the current user's Alacritty config.
 
+Because `/etc/skel` is only copied automatically when a user is created, the installer offers to sync Omarchy defaults into the existing user's home. It backs up every existing file that will be replaced. For an already-installed system, rerun with `--apply-user-configs` to do this explicitly. Afterward, choose **Omarchy** in SDDM, not a generic CachyOS Hyprland entry.
+
 ## Important limitations
 
 - This is an experimental CachyOS adaptation, not an officially supported Omarchy installation method. A Btrfs root alone does not guarantee boot snapshots or a working rollback; test Snapper and keep a separate backup.
@@ -17,4 +19,4 @@ Review the script, then run it as the regular CachyOS user (not via `sudo`):
 bash install-omarchy-on-cachyos.sh
 ```
 
-It requires the user to type `INSTALL` before making changes. It backs up `/etc/pacman.conf` and restores it if the package installation command fails.
+It requires the user to type `INSTALL` before system changes. Applying defaults to an existing home requires a separate confirmation and creates a timestamped backup under `~/.local/backups/`. It backs up `/etc/pacman.conf` and restores it if the package installation command fails.
