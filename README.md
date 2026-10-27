@@ -20,3 +20,13 @@ bash install-omarchy-on-cachyos.sh
 ```
 
 It requires the user to type `INSTALL` before system changes. Applying defaults to an existing home requires a separate confirmation and creates a timestamped backup under `~/.local/backups/`. It backs up `/etc/pacman.conf` and restores it if the package installation command fails.
+
+## Uninstall
+
+Review and run the uninstaller as the regular user (not with `sudo`):
+
+```bash
+bash uninstall-omarchy-on-cachyos.sh
+```
+
+It removes only installed packages named `omarchy` or `omarchy-*` (without cascading into shared dependencies), removes the Omarchy pacman repository/key, and offers to archive then remove Omarchy-specific user state. It deliberately preserves KDE and shared Hyprland configuration and does not modify bootloader entries; inspect Limine/boot configuration manually before changing it.
