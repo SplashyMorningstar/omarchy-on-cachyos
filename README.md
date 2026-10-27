@@ -82,9 +82,3 @@ Type `REMOVE-OMARCHY` to confirm. The uninstaller archives Omarchy-specific user
 - The installation does not format or repartition disks, uninstall KDE, or automatically configure the bootloader.
 - Omarchy includes Limine/Snapper integration, but this installer does not configure an Omarchy boot entry. A Limine/Snapper notification may report that the `Omarchy` target is missing. Do not edit boot settings or change bootloaders without verifying the machine's active boot setup.
 
-## Troubleshooting
-
-- **Hyprland looks like CachyOS:** Make sure you selected **Omarchy (Hyprland uwsm)** in SDDM, not `Hyprland` or `Hyprland (uwsm)` from CachyOS. For an already-installed system, run the [user-config repair](#repairapply-user-configuration) command above.
-- **User provisioning reports `mise: command not found`:** Update this repository and rerun the user-config repair command. The current script installs Omarchy's base package list, including `mise`, before provisioning.
-- **Alacritty package conflict:** The installer has a narrow overwrite exception for CachyOS's `/etc/skel` Alacritty template. It does not remove `cachyos-alacritty-config` or overwrite the active user's Alacritty config.
-- **Limine/Snapper target notification:** This is separate from the Hyprland session and does not prove the install failed. The script intentionally leaves bootloader configuration untouched; investigate the active boot setup before attempting a repair.
