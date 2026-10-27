@@ -1,60 +1,60 @@
-# Omarchy en CachyOS (experimental)
+# Omarchy on CachyOS (experimental)
 
-Instalador experimental basado en [mroboff/omarchy-on-cachyos](https://github.com/mroboff/omarchy-on-cachyos), adaptado al sistema de paquetes de Omarchy 4.
+An experimental installer inspired by [mroboff/omarchy-on-cachyos](https://github.com/mroboff/omarchy-on-cachyos), adapted for Omarchy 4's package-based distribution.
 
-El instalador comprueba CachyOS x86_64, Btrfs en `/` y una configuración Snapper llamada `root`. Después configura el repositorio oficial estable, instala los paquetes base de Omarchy, aplica sus configuraciones al usuario actual con copias de seguridad y ejecuta la preparación de usuario.
+The installer checks for CachyOS x86_64, Btrfs on `/`, and a Snapper configuration named `root`. It then configures the official stable repository, installs Omarchy's base packages, applies Omarchy defaults to the current user with backups, and runs user provisioning.
 
-## Instalación
+## Installation
 
-Ejecuta estos comandos como tu usuario normal de CachyOS, **no** con `sudo`:
+Run these commands as your regular CachyOS user, **not** with `sudo`:
 
-### 1. Clona el repositorio
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/SplashyMorningstar/omarchy-on-cachyos.git
 cd omarchy-on-cachyos
 ```
 
-### 2. Da permisos de ejecución al instalador y al desinstalador
+### 2. Make the installer and uninstaller executable
 
 ```bash
 chmod +x install-omarchy-on-cachyos.sh uninstall-omarchy-on-cachyos.sh
 ```
 
-### 3. Ejecuta el instalador
+### 3. Run the installer
 
 ```bash
 ./install-omarchy-on-cachyos.sh
 ```
 
-Revisa el aviso y escribe `INSTALL` para confirmar. El script actualiza el sistema e instala Omarchy. Los archivos de configuración existentes que vaya a reemplazar se guardan en `~/.local/backups/`.
+Review the notice and type `INSTALL` to confirm. The script upgrades the system and installs Omarchy. Existing configuration files it replaces are backed up under `~/.local/backups/`.
 
-Al terminar, cierra sesión y selecciona **Omarchy (Hyprland uwsm)** en SDDM; no selecciones la sesión Hyprland genérica de CachyOS.
+When it finishes, log out and select **Omarchy (Hyprland uwsm)** in SDDM; do not select CachyOS's generic Hyprland session.
 
-### Reparar/aplicar la configuración de usuario
+### Repair/apply user configuration
 
-Si Omarchy ya está instalado pero la configuración de usuario no se completó, actualiza el repositorio y ejecuta:
+If Omarchy is already installed but user setup did not complete, update the repository and run:
 
 ```bash
 git pull
 ./install-omarchy-on-cachyos.sh --apply-user-configs
 ```
 
-Escribe `APPLY-OMARCHY-CONFIGS` para confirmar. El script instalará los paquetes base que falten, respaldará los archivos coincidentes, aplicará los valores de Omarchy y volverá a ejecutar la preparación del usuario.
+Type `APPLY-OMARCHY-CONFIGS` to confirm. The script installs any missing base packages, backs up matching files, applies Omarchy defaults, and reruns user provisioning.
 
-## Desinstalación
+## Uninstallation
 
-Desde el directorio del repositorio, ejecuta como usuario normal:
+From the repository directory, run as your regular user:
 
 ```bash
 ./uninstall-omarchy-on-cachyos.sh
 ```
 
-Escribe `REMOVE-OMARCHY` para confirmar. El desinstalador archiva los datos específicos de Omarchy y elimina los paquetes con nombre `omarchy` o `omarchy-*`, el repositorio de pacman y su clave. No elimina KDE ni dependencias compartidas, conserva configuraciones Hyprland que podrían pertenecer a CachyOS y **no modifica el cargador de arranque**.
+Type `REMOVE-OMARCHY` to confirm. The uninstaller archives Omarchy-specific user data and removes packages named `omarchy` or `omarchy-*`, the pacman repository, and its signing key. It does not remove KDE or shared dependencies, preserves Hyprland configuration that may belong to CachyOS, and **does not modify the bootloader**.
 
-## Limitaciones importantes
+## Important limitations
 
-- Es un método experimental y no oficial. Btrfs por sí solo no garantiza que Snapper o la recuperación del arranque estén correctamente configurados; conserva una copia de seguridad externa.
-- El instalador usa la versión **estable actual** de Omarchy, no fija una versión histórica como 4.0.5.
-- Después de instalar Omarchy, usa `omarchy update` para actualizarlo. No uses `pacman -Syu` directamente para saltarte el flujo de actualización de Omarchy.
-- La instalación no formatea ni reparte discos, no desinstala KDE y no configura automáticamente el cargador de arranque.
+- This is experimental and unofficial. Btrfs alone does not guarantee that Snapper or boot recovery is configured correctly; keep an external backup.
+- The installer uses the **current stable** Omarchy release; it does not pin a historical version such as 4.0.5.
+- After installing Omarchy, use `omarchy update` to update it. Do not run `pacman -Syu` directly to bypass Omarchy's update flow.
+- The installation does not format or repartition disks, uninstall KDE, or automatically configure the bootloader.
