@@ -4,7 +4,7 @@ This installer is inspired by [mroboff/omarchy-on-cachyos](https://github.com/mr
 
 It verifies CachyOS, x86_64, Btrfs root, and a Snapper `root` config; adds the signed **stable** Omarchy package repository; then performs a full system upgrade while installing the `omarchy` package. Arch-based distributions require full upgrades rather than partial package upgrades. It does not format disks or remove KDE. It intentionally does not force a display-manager change or delete CachyOS packages. If the installed `cachyos-alacritty-config` package owns Omarchy's `/etc/skel` Alacritty template, pacman is allowed to replace only that template; the script does not remove the CachyOS package or alter the current user's Alacritty config.
 
-Because `/etc/skel` is only copied automatically when a user is created, the installer offers to sync Omarchy defaults into the existing user's home. It backs up every existing file that will be replaced. For an already-installed system, rerun with `--apply-user-configs` to do this explicitly. Afterward, choose **Omarchy** in SDDM, not a generic CachyOS Hyprland entry.
+Because `/etc/skel` is only copied automatically when a user is created, the installer installs Omarchy's full base package list, backs up and syncs the defaults into the existing user's home, and runs user provisioning. This includes `mise`, required by Omarchy's user setup. It keeps CachyOS `tealdeer` instead of installing the conflicting `tldr` package. For an already-installed system, rerun with `--apply-user-configs` to do this explicitly. Afterward, choose **Omarchy (Hyprland uwsm)** in SDDM, not a generic CachyOS Hyprland entry.
 
 ## Important limitations
 
@@ -19,7 +19,7 @@ Review the script, then run it as the regular CachyOS user (not via `sudo`):
 bash install-omarchy-on-cachyos.sh
 ```
 
-It requires the user to type `INSTALL` before system changes. Applying defaults to an existing home requires a separate confirmation and creates a timestamped backup under `~/.local/backups/`. It backs up `/etc/pacman.conf` and restores it if the package installation command fails.
+It requires the user to type `INSTALL` before system changes. Existing home files replaced during automatic config sync are backed up under `~/.local/backups/`. The standalone `--apply-user-configs` mode requires a separate typed confirmation. The installer backs up `/etc/pacman.conf` and restores it if the package installation command fails.
 
 ## Uninstall
 

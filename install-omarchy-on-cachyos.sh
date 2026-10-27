@@ -13,17 +13,39 @@ die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
 
 sync_existing_user_configs() {
+  local confirmed=${1:-no}
   [[ $EUID -ne 0 ]] || die 'Run this as the regular desktop user, not with sudo.'
   pacman -Q omarchy >/dev/null 2>&1 || die 'Omarchy is not installed yet.'
   [[ -f /etc/skel/.config/hypr/hyprland.lua ]] || die 'Omarchy Hyprland defaults were not found in /etc/skel.'
 
-  cat <<'WARNING'
+  if [[ $confirmed != yes ]]; then
+    cat <<'WARNING'
 This copies Omarchy's shipped defaults from /etc/skel into your existing home.
 Files with matching paths will be replaced. A backup of every existing file
 that would be replaced is made first. Your unrelated files are left in place.
 WARNING
-  read -r -p 'Type APPLY-OMARCHY-CONFIGS to continue: ' answer
-  [[ $answer == APPLY-OMARCHY-CONFIGS ]] || die 'Cancelled; no user files changed.'
+    read -r -p 'Type APPLY-OMARCHY-CONFIGS to continue: ' answer
+    [[ $answer == APPLY-OMARCHY-CONFIGS ]] || die 'Cancelled; no user files changed.'
+  fi
+
+  local package_list
+  local -a base_packages
+  package_list='/usr/share/omarchy/install/omarchy-base.packages'
+  [[ -r $package_list ]] || die "Omarchy base package list not found: $package_list"
+  mapfile -t base_packages < <(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$package_list")
+  if pacman -Q tealdeer >/dev/null 2>&1; then
+    local -a filtered_packages=()
+    local package
+    for package in "${base_packages[@]}"; do
+      [[ $package == tldr ]] || filtered_packages+=("$package")
+    done
+    base_packages=("${filtered_packages[@]}")
+    info 'Keeping CachyOS tealdeer; omitting the conflicting tldr package'
+  fi
+  ((${#base_packages[@]})) || die 'Omarchy base package list is empty.'
+
+  info 'Installing Omarchy base packages required for user provisioning'
+  sudo pacman -S --needed -- "${base_packages[@]}"
 
   local backup source relative destination
   backup="$HOME/.local/backups/omarchy-configs-before-sync-$(date +%Y%m%d-%H%M%S)"
@@ -102,8 +124,11 @@ This installs Omarchy's official stable packages on this existing CachyOS
 installation. It does NOT format or repartition disks and does NOT uninstall
 KDE. However, CachyOS + KDE is not an officially supported Omarchy platform.
 
-Make a verified backup and a Snapper snapshot first. Review the script before
-running it. Later Omarchy upgrades must be done with `omarchy update`.
+It also installs Omarchy's base package set, backs up and applies Omarchy's
+defaults to this existing user's home, and runs Omarchy user provisioning.
+Matching user config files are replaced after being backed up under
+~/.local/backups/. Make a verified backup and Snapper snapshot first. Later
+Omarchy upgrades must be done with `omarchy update`.
 NOTICE
 
 read -r -p 'Type INSTALL to continue: ' answer
@@ -160,13 +185,8 @@ else
   printf '\nWarning: the Omarchy SDDM session entry was not found under /usr/local/share/wayland-sessions.\n' >&2
 fi
 
-printf '\nThe existing user home is not automatically seeded from /etc/skel.\n'
-read -r -p 'Apply Omarchy defaults to this user now (backups will be made)? [y/N]: ' apply_configs
-if [[ ${apply_configs,,} == y || ${apply_configs,,} == yes ]]; then
-  sync_existing_user_configs
-else
-  printf 'Skipped user config sync. Later, run this script with --apply-user-configs.\n'
-fi
+printf '\nApplying Omarchy defaults and provisioning this existing user.\n'
+sync_existing_user_configs yes
 
 cat <<'DONE'
 
