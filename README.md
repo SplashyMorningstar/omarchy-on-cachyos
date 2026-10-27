@@ -2,7 +2,7 @@
 
 This installer is inspired by [mroboff/omarchy-on-cachyos](https://github.com/mroboff/omarchy-on-cachyos), but follows Omarchy 4's package-based distribution instead of editing old Omarchy `install.sh` files with `sed`.
 
-It verifies CachyOS, x86_64, Btrfs root, and a Snapper `root` config; adds the signed **stable** Omarchy package repository; then performs a full system upgrade while installing the `omarchy` package. Arch-based distributions require full upgrades rather than partial package upgrades. It does not format disks or remove KDE. It intentionally does not force a display-manager change or delete CachyOS packages.
+It verifies CachyOS, x86_64, Btrfs root, and a Snapper `root` config; adds the signed **stable** Omarchy package repository; then performs a full system upgrade while installing the `omarchy` package. Arch-based distributions require full upgrades rather than partial package upgrades. It does not format disks or remove KDE. It intentionally does not force a display-manager change or delete CachyOS packages. If the installed `cachyos-alacritty-config` package owns Omarchy's `/etc/skel` Alacritty template, pacman is allowed to replace only that template; the script does not remove the CachyOS package or alter the current user's Alacritty config.
 
 ## Important limitations
 

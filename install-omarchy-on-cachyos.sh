@@ -90,7 +90,23 @@ rollback_repo() {
 trap rollback_repo EXIT
 
 info 'Synchronizing the system and installing Omarchy (full Arch upgrade required)'
-sudo pacman -Syyu --needed omarchy
+pacman_args=()
+skel_alacritty='/etc/skel/.config/alacritty/alacritty.toml'
+alacritty_owner=$(pacman -Qqo "$skel_alacritty" 2>/dev/null || true)
+if [[ $alacritty_owner == cachyos-* ]]; then
+  cat <<EOF
+Detected a known CachyOS package file conflict:
+  $skel_alacritty (owned by $alacritty_owner)
+
+Omarchy's settings package also supplies this default for newly created users.
+The installer will let Omarchy replace only this one /etc/skel template. This
+does not change the current user's Alacritty configuration or remove the
+CachyOS package.
+EOF
+  pacman_args+=(--overwrite "${skel_alacritty#/}")
+fi
+
+sudo pacman -Syyu --needed "${pacman_args[@]}" omarchy
 
 trap - EXIT
 cat <<'DONE'
