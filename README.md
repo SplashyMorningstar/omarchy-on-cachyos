@@ -69,16 +69,7 @@ When it finishes, log out and select **Omarchy (Hyprland uwsm)** in SDDM, or the
 
 The Omarchy session entry is installed at `/usr/local/share/wayland-sessions/omarchy.desktop`. For GDM, LightDM, Ly, and other managers using the standard Wayland session directory, the installer creates `/usr/share/wayland-sessions/omarchy-cachyos.desktop` when that path is available. The uninstaller removes this link if it created it.
 
-### Repair/apply user configuration
-
-If Omarchy is already installed but user setup did not complete, update the repository and run:
-
-```bash
-git pull
-./install-omarchy-on-cachyos.sh --apply-user-configs
-```
-
-First update Omarchy itself from its session with `omarchy update`. Then type `APPLY-OMARCHY-CONFIGS` to confirm. The script installs any missing base packages, backs up matching files, applies the defaults shipped by the installed Omarchy package, and reruns user provisioning. If it detects no display manager, it also offers the same explicit SDDM enablement option as the main installer. This repair option does not upgrade Omarchy.
+**If user setup did not complete:** From the repository directory, first update Omarchy from its session with `omarchy update`, then run `git pull` and `./install-omarchy-on-cachyos.sh --apply-user-configs`. Type `APPLY-OMARCHY-CONFIGS` to confirm. This installs missing base packages, backs up matching files before applying the installed Omarchy defaults, and reruns user provisioning; it does not upgrade Omarchy. If no display manager is detected, it also offers the explicit SDDM enablement option.
 
 ## Uninstallation
 
