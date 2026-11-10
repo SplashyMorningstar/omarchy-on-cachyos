@@ -3,6 +3,12 @@ set -Eeuo pipefail
 
 readonly OMARCHY_KEY_FINGERPRINT="40DFB630FF42BCFFB047046CF0134EE680CAC571"
 readonly PACMAN_CONF="/etc/pacman.conf"
+readonly SESSION_SOURCE="/usr/local/share/wayland-sessions/omarchy.desktop"
+readonly SESSION_COMPAT_LINK="/usr/share/wayland-sessions/omarchy-cachyos.desktop"
+readonly INSTALL_STATE_DIR="/var/lib/omarchy-on-cachyos"
+readonly SESSION_LINK_MARKER="$INSTALL_STATE_DIR/created-wayland-session-link"
+readonly SDDM_ENABLED_MARKER="$INSTALL_STATE_DIR/enabled-sddm"
+readonly DEFAULT_TARGET_MARKER="$INSTALL_STATE_DIR/default-target-before-sddm"
 
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
@@ -30,6 +36,9 @@ user state before removing it.
 
 It does NOT remove shared dependencies, KDE, generic Hyprland configs, personal
 files, or edit bootloader entries. Review the package list before continuing.
+If this installer enabled SDDM, changed the default boot target, or added a
+generic Wayland session link, those installer-managed changes will be handled
+separately below.
 NOTICE
 
 read -r -p 'Type REMOVE-OMARCHY to continue: ' answer
@@ -61,6 +70,50 @@ if ((${#packages[@]})); then
   # No -s or -n: do not cascade into shared dependencies or purge user data.
   sudo pacman -R -- "${packages[@]}"
 fi
+
+if [[ -f $SDDM_ENABLED_MARKER ]] && command -v systemctl >/dev/null 2>&1; then
+  current_target=$(systemctl get-default 2>/dev/null || true)
+  if [[ -f $DEFAULT_TARGET_MARKER && $current_target == graphical.target ]]; then
+    original_target=$(<"$DEFAULT_TARGET_MARKER")
+    if systemctl is-enabled --quiet sddm.service 2>/dev/null; then
+      read -r -p "This installer enabled SDDM and changed the default target from $original_target to graphical.target. Keep both? [Y/n]: " keep_sddm
+      if [[ ${keep_sddm,,} == n || ${keep_sddm,,} == no ]]; then
+        sudo systemctl disable sddm.service || printf 'Warning: could not disable SDDM; disable it manually if desired.\n' >&2
+        sudo systemctl set-default "$original_target" || printf 'Warning: could not restore the previous default target (%s).\n' "$original_target" >&2
+      else
+        printf 'Keeping SDDM and graphical.target enabled.\n'
+      fi
+    else
+      read -r -p "SDDM is already disabled. Restore the previous default target ($original_target)? [Y/n]: " restore_target
+      if [[ ${restore_target,,} != n && ${restore_target,,} != no ]]; then
+        sudo systemctl set-default "$original_target" || printf 'Warning: could not restore the previous default target (%s).\n' "$original_target" >&2
+      else
+        printf 'Leaving graphical.target unchanged.\n'
+      fi
+    fi
+  elif systemctl is-enabled --quiet sddm.service 2>/dev/null; then
+    read -r -p 'This installer enabled SDDM. Keep it enabled after removing Omarchy? [Y/n]: ' keep_sddm
+    if [[ ${keep_sddm,,} == n || ${keep_sddm,,} == no ]]; then
+      sudo systemctl disable sddm.service || printf 'Warning: could not disable SDDM; disable it manually if desired.\n' >&2
+    else
+      printf 'Keeping SDDM enabled. It may still be useful for another installed desktop.\n'
+    fi
+  fi
+fi
+
+if [[ -f $SESSION_LINK_MARKER ]]; then
+  if [[ -L $SESSION_COMPAT_LINK && $(readlink -- "$SESSION_COMPAT_LINK") == "$SESSION_SOURCE" ]]; then
+    if session_owner=$(pacman -Qqo "$SESSION_COMPAT_LINK" 2>/dev/null); then
+      printf 'Keeping %s because it is now owned by package %s.\n' "$SESSION_COMPAT_LINK" "$session_owner"
+    else
+      sudo rm -f -- "$SESSION_COMPAT_LINK"
+      info 'Removed the generic Wayland session link created by this installer'
+    fi
+  fi
+fi
+
+sudo rm -f -- "$SESSION_LINK_MARKER" "$SDDM_ENABLED_MARKER" "$DEFAULT_TARGET_MARKER"
+sudo rmdir "$INSTALL_STATE_DIR" 2>/dev/null || true
 
 if ((${#existing_paths[@]})); then
   read -r -p 'Remove the archived Omarchy-specific user paths? [y/N]: ' remove_user_data
