@@ -16,9 +16,83 @@ readonly INSTALL_STATE_DIR="/var/lib/omarchy-on-cachyos"
 readonly SESSION_LINK_MARKER="$INSTALL_STATE_DIR/created-wayland-session-link"
 readonly SDDM_ENABLED_MARKER="$INSTALL_STATE_DIR/enabled-sddm"
 readonly DEFAULT_TARGET_MARKER="$INSTALL_STATE_DIR/default-target-before-sddm"
+SUDO_KEEPALIVE_PID=""
+PACMAN_CONF_BACKUP=""
+PACMAN_CONF_CHANGED=false
 
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
+
+stop_sudo_keepalive() {
+  if [[ -n $SUDO_KEEPALIVE_PID ]]; then
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    wait "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    SUDO_KEEPALIVE_PID=""
+  fi
+}
+
+on_exit() {
+  local status=$?
+  stop_sudo_keepalive
+
+  if ((status != 0)) && [[ $PACMAN_CONF_CHANGED == true && -n $PACMAN_CONF_BACKUP && -f $PACMAN_CONF_BACKUP ]]; then
+    printf '\nInstall failed. Restoring pacman.conf from %s\n' "$PACMAN_CONF_BACKUP" >&2
+    sudo cp -a "$PACMAN_CONF_BACKUP" "$PACMAN_CONF" ||
+      printf 'Warning: could not restore pacman.conf; restore it manually from %s.\n' "$PACMAN_CONF_BACKUP" >&2
+  fi
+
+  return "$status"
+}
+trap on_exit EXIT
+
+start_sudo_keepalive() {
+  if [[ -n $SUDO_KEEPALIVE_PID ]] && kill -0 "$SUDO_KEEPALIVE_PID" 2>/dev/null; then
+    return 0
+  fi
+
+  info 'Authenticating with sudo; the installer will reuse this authorization'
+  sudo -v || die 'Could not authenticate with sudo.'
+
+  # Keep the sudo timestamp alive while pacman and provisioning run. Never add a
+  # passwordless sudo rule or store the password in the installer.
+  (
+    sleep_pid=""
+    cleanup_keepalive() {
+      [[ -n $sleep_pid ]] && kill "$sleep_pid" 2>/dev/null || true
+    }
+    trap cleanup_keepalive EXIT
+
+    while :; do
+      sleep 45 &
+      sleep_pid=$!
+      wait "$sleep_pid" || exit 0
+      sleep_pid=""
+      sudo -n -v || exit 0
+    done
+  ) <&0 >/dev/null 2>&1 &
+  SUDO_KEEPALIVE_PID=$!
+}
+
+ensure_chromium_theme_policy() {
+  local policy_dir=/etc/chromium/policies/managed
+  local policy_setup=/usr/share/omarchy/install/config/browser-policy.sh
+
+  command -v chromium >/dev/null 2>&1 || return 0
+  [[ -d $policy_dir && ! -L $policy_dir ]] && return 0
+
+  if [[ -e $policy_dir || -L $policy_dir ]]; then
+    printf 'Warning: Chromium policy path exists but is not a normal directory: %s\n' "$policy_dir" >&2
+    return 1
+  fi
+
+  [[ -r $policy_setup ]] || {
+    printf 'Warning: Omarchy Chromium policy setup was not found: %s\n' "$policy_setup" >&2
+    return 1
+  }
+
+  info 'Creating Omarchy managed Chromium policy directory'
+  sudo env OMARCHY_PATH=/usr/share/omarchy bash "$policy_setup"
+}
 
 detect_display_manager() {
   local target units unit
@@ -202,7 +276,10 @@ WARNING
   ((${#base_packages[@]})) || die 'Omarchy base package list is empty.'
 
   info 'Installing Omarchy base packages required for user provisioning'
-  sudo pacman -S --needed -- "${base_packages[@]}"
+  start_sudo_keepalive
+  # Pacman's ask value 4 accepts only removal of a conflicting package; leave
+  # the transaction confirmation and all unrelated prompts interactive.
+  sudo pacman -S --needed --ask=4 -- "${base_packages[@]}"
 
   local backup source relative destination
   backup="$HOME/.local/backups/omarchy-configs-before-sync-$(date +%Y%m%d-%H%M%S)"
@@ -224,6 +301,19 @@ WARNING
 
   omarchy-provision-user --force
 
+  if ! ensure_chromium_theme_policy; then
+    printf 'Warning: Chromium theme policy could not be initialized.\n' >&2
+  fi
+
+  if command -v omarchy-theme-set-browser >/dev/null 2>&1; then
+    info 'Applying the current Omarchy theme to installed Chromium-based browsers'
+    if ! omarchy-theme-set-browser; then
+      printf 'Warning: Chromium theme synchronization did not complete. Try `omarchy-theme-set-browser` from the Omarchy session.\n' >&2
+    fi
+  else
+    printf 'Warning: omarchy-theme-set-browser is unavailable; browser colors may not follow Omarchy themes.\n' >&2
+  fi
+
   register_wayland_session "$(detect_display_manager)"
   info 'Omarchy user defaults are now in place.'
 }
@@ -233,6 +323,21 @@ if [[ ${1:-} == '--apply-user-configs' ]]; then
   display_manager=$(detect_display_manager)
   sync_existing_user_configs
   offer_enable_sddm_if_no_manager "$display_manager"
+  exit 0
+fi
+
+if [[ ${1:-} == '--sync-browser-theme' ]]; then
+  [[ $# -eq 1 ]] || die 'Usage: install-omarchy-on-cachyos.sh --sync-browser-theme'
+  [[ $EUID -ne 0 ]] || die 'Run this as the regular user, not with sudo.'
+  command -v sudo >/dev/null || die 'sudo is required.'
+  command -v pacman >/dev/null || die 'pacman is required.'
+  pacman -Q omarchy >/dev/null 2>&1 || die 'Omarchy is not installed.'
+  command -v omarchy-theme-set-browser >/dev/null || die 'Omarchy browser theme integration is unavailable.'
+
+  start_sudo_keepalive
+  ensure_chromium_theme_policy || die 'Could not initialize the Chromium theme policy; inspect the warning above.'
+  omarchy-theme-set-browser || die 'Could not synchronize the current Omarchy theme to browsers.'
+  info 'Current Omarchy theme synchronized to installed Chromium-based browsers.'
   exit 0
 fi
 
@@ -255,13 +360,10 @@ fi
 command -v pacman >/dev/null || die 'pacman is required.'
 command -v sudo >/dev/null || die 'sudo is required.'
 command -v btrfs >/dev/null || die 'btrfs-progs is required to verify the root filesystem.'
+command -v snapper >/dev/null || die 'snapper is required to verify the root snapshot configuration.'
 
 root_fstype=$(findmnt -n -o FSTYPE /)
 [[ $root_fstype == btrfs ]] || die "Root filesystem is '$root_fstype', not Btrfs. No changes made."
-
-if ! command -v snapper >/dev/null || ! sudo snapper -c root list-configs 2>/dev/null | grep -q '^root '; then
-  die 'Btrfs is present, but a Snapper config named root was not detected. Configure and test Snapper snapshots first; no changes made.'
-fi
 
 if [[ -n ${SSH_CONNECTION:-} ]]; then
   die 'Run this from the local desktop session, not over SSH.'
@@ -314,30 +416,29 @@ esac
 read -r -p 'Type INSTALL to continue: ' answer
 [[ $answer == INSTALL ]] || die 'Cancelled; no changes made.'
 
+start_sudo_keepalive
+
+if ! sudo snapper -c root list-configs 2>/dev/null | grep -q '^root '; then
+  die 'Btrfs is present, but a Snapper config named root was not detected. Configure and test Snapper snapshots first; no system changes were made.'
+fi
+
 info 'Saving pacman configuration backup'
 backup="${PACMAN_CONF}.before-omarchy.$(date +%Y%m%d-%H%M%S)"
 sudo cp -a "$PACMAN_CONF" "$backup"
+PACMAN_CONF_BACKUP=$backup
 printf 'Saved: %s\n' "$backup"
 
 info 'Importing and locally trusting the Omarchy repository signing key'
 sudo pacman-key --recv-keys "$OMARCHY_KEY_FINGERPRINT" --keyserver keys.openpgp.org
 sudo pacman-key --lsign-key "$OMARCHY_KEY_FINGERPRINT"
 
+PACMAN_CONF_CHANGED=true
 sudo tee -a "$PACMAN_CONF" >/dev/null <<EOF
 
 [omarchy]
 SigLevel = Required DatabaseOptional
 Server = $OMARCHY_REPO
 EOF
-
-rollback_repo() {
-  status=$?
-  if (( status != 0 )); then
-    printf '\nInstall failed. Restoring pacman.conf from %s\n' "$backup" >&2
-    sudo cp -a "$backup" "$PACMAN_CONF"
-  fi
-}
-trap rollback_repo EXIT
 
 info 'Synchronizing the system and installing Omarchy (full Arch upgrade required)'
 info 'Refreshing package databases and checking the official stable Omarchy release'
@@ -368,9 +469,9 @@ EOF
   pacman_args+=(--overwrite "${skel_alacritty#/}")
 fi
 
-sudo pacman -Syu --needed "${pacman_args[@]}" omarchy
+sudo pacman -Syu --needed --ask=4 "${pacman_args[@]}" omarchy
 
-trap - EXIT
+PACMAN_CONF_CHANGED=false
 installed_omarchy=$(pacman -Q omarchy | awk '{print $2}')
 [[ -n $installed_omarchy ]] || die 'Omarchy was not found after the package transaction.'
 if (( $(vercmp "$installed_omarchy" "$MIN_OMARCHY_VERSION") < 0 )); then

@@ -2,11 +2,11 @@
 
 An experimental way to try Omarchy on an existing CachyOS installation. This project is inspired by [mroboff/omarchy-on-cachyos](https://github.com/mroboff/omarchy-on-cachyos), but adapts its package-based setup for Omarchy 4.5 and newer. It installs Omarchy's official stable packages on top of CachyOS; it is **not** an official Omarchy installer or a replacement for installing from the official ISO.
 
-The installer configures Omarchy's signed stable package repository, checks that the available Omarchy release is at least 4.5.0, performs a full system upgrade, installs the base package list shipped by that Omarchy release, backs up and applies the shipped defaults to the current user, and runs Omarchy's user-provisioning steps. It prepares the Omarchy session for SDDM or registers a standard Wayland session entry for compatible managers, while leaving CachyOS and its existing desktop installed. The version is not pinned: later stable releases are accepted automatically.
+The installer configures Omarchy's signed stable package repository, checks that the available Omarchy release is at least 4.5.0, performs a full system upgrade, installs the base package list shipped by that Omarchy release, backs up and applies the shipped defaults to the current user, and runs Omarchy's user-provisioning steps. It initializes Chromium's managed policy if it is missing and reapplies the active theme to installed Chromium-based browsers; later theme changes use Omarchy's browser theme integration. It prepares the Omarchy session for SDDM or registers a standard Wayland session entry for compatible managers, while leaving CachyOS and its existing desktop installed. The version is not pinned: later stable releases are accepted automatically.
 
 ## Desktop environment compatibility
 
-- **CachyOS without a desktop environment:** This is a suitable starting point. Omarchy installs SDDM as an upstream package dependency. If no enabled display manager is detected, the installer explicitly asks whether to enable SDDM for the next boot; if necessary, it also changes the default target to `graphical.target`. Neither change is made without confirmation.
+- **CachyOS without a desktop environment:** This is a supported starting point; this repository installs Omarchy on an already-installed CachyOS system, it does not install CachyOS itself. Omarchy installs SDDM as an upstream package dependency. If no enabled display manager is detected, the installer explicitly asks whether to enable SDDM for the next boot; if necessary, it also changes the default target to `graphical.target`. Neither change is made without confirmation.
 - **KDE Plasma, XFCE, or another desktop:** The installer does not remove the existing desktop or switch an enabled display manager. Omarchy/Hyprland is added as another session. Log out and choose the Omarchy Wayland session in your login manager. Coexistence is experimental; applications and shared settings may behave differently between desktops.
 - **Shared user account:** Omarchy's defaults are copied into the account that runs the installer. Matching files are backed up, then replaced with Omarchy defaults; unrelated files are left in place. This can change settings for applications used from KDE, XFCE, or other desktops. For stronger separation, use a dedicated CachyOS user for Omarchy rather than sharing one home directory.
 
@@ -32,7 +32,7 @@ Desktop coexistence is experimental and does not guarantee every application, th
 - CachyOS on **x86_64**. Other Arch-based distributions are not accepted by the installer.
 - Btrfs mounted as the root filesystem (`/`).
 - Snapper installed and configured with a configuration named `root`. The installer checks for this, but you should verify that snapshots and rollback actually work.
-- A regular user with working `sudo` access. Do not run either script as root or with `sudo`.
+- A regular user with working `sudo` access. Do not run either script as root or with `sudo`. The installer asks for sudo authentication once and keeps that authorization alive while it runs; it does not enable passwordless sudo.
 - A Wayland-capable display manager, or willingness to explicitly enable SDDM when prompted if none is detected.
 - Internet access for the system upgrade, Omarchy repository, packages, and first-time user provisioning.
 - Enough free disk space for a full system upgrade and Omarchy's base package set.
@@ -63,13 +63,15 @@ chmod +x install-omarchy-on-cachyos.sh uninstall-omarchy-on-cachyos.sh
 ./install-omarchy-on-cachyos.sh
 ```
 
-Review the notice and type `INSTALL` to confirm. The script upgrades the system and installs Omarchy. Existing configuration files it replaces are backed up under `~/.local/backups/`.
+Review the notice and type `INSTALL` to confirm. Then authenticate with sudo once. The script upgrades the system and installs Omarchy. Pacman still shows its transaction summary and other decisions, but the installer automatically accepts only Pacman's prompt to remove a package that conflicts with the requested Omarchy packages. It does not use `--noconfirm` or automatically overwrite arbitrary files. Existing configuration files it replaces are backed up under `~/.local/backups/`.
 
 When it finishes, log out and select **Omarchy (Hyprland uwsm)** in SDDM, or the Omarchy Wayland session in a compatible manager. Do not select CachyOS's generic Hyprland session; that may load CachyOS's Hyprland configuration instead. If the installer enabled SDDM, reboot to start it.
 
 The Omarchy session entry is installed at `/usr/local/share/wayland-sessions/omarchy.desktop`. For GDM, LightDM, Ly, and other managers using the standard Wayland session directory, the installer creates `/usr/share/wayland-sessions/omarchy-cachyos.desktop` when that path is available. The uninstaller removes this link if it created it.
 
-**If user setup did not complete:** From the repository directory, first update Omarchy from its session with `omarchy update`, then run `git pull` and `./install-omarchy-on-cachyos.sh --apply-user-configs`. Type `APPLY-OMARCHY-CONFIGS` to confirm. This installs missing base packages, backs up matching files before applying the installed Omarchy defaults, and reruns user provisioning; it does not upgrade Omarchy. If no display manager is detected, it also offers the explicit SDDM enablement option.
+**If user setup did not complete:** From the repository directory, first update Omarchy from its session with `omarchy update`, then run `git pull` and `./install-omarchy-on-cachyos.sh --apply-user-configs`. Type `APPLY-OMARCHY-CONFIGS` to confirm. This installs missing base packages, backs up matching files before applying the installed Omarchy defaults, reapplies the current theme to Chromium-based browsers, and reruns user provisioning; it does not upgrade Omarchy. If no display manager is detected, it also offers the explicit SDDM enablement option.
+
+**If Chromium does not follow theme changes on an existing installation:** Run `./install-omarchy-on-cachyos.sh --sync-browser-theme` from the repository directory. This initializes the managed policy directory if it is missing and reapplies the current theme without replacing user configuration files.
 
 ## Uninstallation
 
