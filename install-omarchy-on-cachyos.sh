@@ -94,6 +94,104 @@ ensure_chromium_theme_policy() {
   sudo env OMARCHY_PATH=/usr/share/omarchy bash "$policy_setup"
 }
 
+seed_sddm_last_user() {
+  local username=${1:-}
+  [[ -n $username ]] || return 1
+
+  sudo python3 - "$username" <<'PY'
+import os
+import pwd
+import re
+import stat
+import sys
+import tempfile
+
+state_file = "/var/lib/sddm/state.conf"
+username = sys.argv[1]
+
+try:
+    account = pwd.getpwnam(username)
+    if account.pw_uid < 1000:
+        raise ValueError("refusing to preselect a system account")
+    sddm = pwd.getpwnam("sddm")
+
+    parent = os.path.dirname(state_file)
+    if not stat.S_ISDIR(os.lstat(parent).st_mode):
+        raise ValueError(f"SDDM state directory is not a real directory: {parent}")
+
+    try:
+        file_info = os.lstat(state_file)
+    except FileNotFoundError:
+        lines = []
+    else:
+        if not stat.S_ISREG(file_info.st_mode):
+            raise ValueError(f"SDDM state file is not a regular file: {state_file}")
+        with open(state_file, "r", encoding="utf-8", newline="") as state:
+            lines = state.readlines()
+
+    section = None
+    last_header = None
+    last_end = None
+    user_index = None
+    existing_user = ""
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if section == "Last" and last_end is None:
+                last_end = index
+            section = stripped[1:-1]
+            if section == "Last":
+                last_header = index
+                last_end = len(lines)
+        elif section == "Last" and re.match(r"^\s*User\s*=", line):
+            user_index = index
+            existing_user = line.split("=", 1)[1].strip()
+
+    if existing_user:
+        print(f"SDDM already remembers user '{existing_user}'; leaving its state unchanged.")
+        sys.exit(0)
+
+    if user_index is not None:
+        old_line = lines[user_index]
+        ending = "\r\n" if old_line.endswith("\r\n") else "\n" if old_line.endswith("\n") else ""
+        lines[user_index] = f"User={username}{ending}"
+    elif last_header is not None:
+        insert_at = last_end if last_end is not None else len(lines)
+        if insert_at and not lines[insert_at - 1].endswith(("\n", "\r")):
+            lines[insert_at - 1] += "\n"
+        lines.insert(insert_at, f"User={username}\n")
+    else:
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines[-1] += "\n"
+        if lines and lines[-1].strip():
+            lines.append("\n")
+        lines.extend(("[Last]\n", f"User={username}\n"))
+
+    fd, staged = tempfile.mkstemp(prefix=".state.conf.", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as output:
+            output.writelines(lines)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chown(staged, sddm.pw_uid, sddm.pw_gid)
+        os.chmod(staged, 0o600)
+        os.replace(staged, state_file)
+        directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if os.path.exists(staged):
+            os.unlink(staged)
+
+    print(f"Seeded SDDM's first-login user as '{username}'. A password is still required.")
+except Exception as error:
+    print(f"Could not initialize SDDM's first-login user: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 detect_display_manager() {
   local target units unit
   command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]] || {
@@ -314,6 +412,10 @@ WARNING
     printf 'Warning: omarchy-theme-set-browser is unavailable; browser colors may not follow Omarchy themes.\n' >&2
   fi
 
+  if ! seed_sddm_last_user "$(id -un)"; then
+    printf 'Warning: SDDM may need a last-user value before its password-only Omarchy greeter can log in.\n' >&2
+  fi
+
   register_wayland_session "$(detect_display_manager)"
   info 'Omarchy user defaults are now in place.'
 }
@@ -338,6 +440,20 @@ if [[ ${1:-} == '--sync-browser-theme' ]]; then
   ensure_chromium_theme_policy || die 'Could not initialize the Chromium theme policy; inspect the warning above.'
   omarchy-theme-set-browser || die 'Could not synchronize the current Omarchy theme to browsers.'
   info 'Current Omarchy theme synchronized to installed Chromium-based browsers.'
+  exit 0
+fi
+
+if [[ ${1:-} == '--fix-sddm-first-login' ]]; then
+  [[ $# -eq 1 ]] || die 'Usage: install-omarchy-on-cachyos.sh --fix-sddm-first-login'
+  [[ $EUID -ne 0 ]] || die 'Run this as the regular user, not with sudo.'
+  command -v sudo >/dev/null || die 'sudo is required.'
+  command -v pacman >/dev/null || die 'pacman is required.'
+  pacman -Q omarchy >/dev/null 2>&1 || die 'Omarchy is not installed.'
+  command -v sddm >/dev/null || die 'SDDM is not installed.'
+
+  start_sudo_keepalive
+  seed_sddm_last_user "$(id -un)" || die 'Could not initialize SDDM; inspect the error above.'
+  info 'SDDM will use this account on its next start; the password prompt remains enabled.'
   exit 0
 fi
 
