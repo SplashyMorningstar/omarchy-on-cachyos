@@ -398,6 +398,7 @@ WARNING
   printf 'Previous matching files backed up to: %s\n' "$backup"
 
   omarchy-provision-user --force
+  configure_legacy_screencast_picker
 
   if ! ensure_chromium_theme_policy; then
     printf 'Warning: Chromium theme policy could not be initialized.\n' >&2
@@ -418,6 +419,25 @@ WARNING
 
   register_wayland_session "$(detect_display_manager)"
   info 'Omarchy user defaults are now in place.'
+}
+
+configure_legacy_screencast_picker() {
+  local picker_info picker_version config_file
+  config_file="$HOME/.config/hypr/xdph.conf"
+
+  [[ -f $config_file && ! -L $config_file ]] || return 0
+  picker_info=$(pacman -Q hyprland-preview-share-picker 2>/dev/null) || return 0
+  picker_version=${picker_info##* }
+
+  # Preview picker versions before 0.3.0 depend on Hyprland's monitor JSON
+  # schema and can fail to build both the window and output pages on newer
+  # Hyprland releases. Use XDPH's built-in picker until the fixed release is
+  # installed; region sharing continues to work either way.
+  (( $(vercmp "$picker_version" '0.3.0') < 0 )) || return 0
+  grep -Eq '^[[:space:]]*custom_picker_binary[[:space:]]*=[[:space:]]*hyprland-preview-share-picker([[:space:]]*(#.*)?)?$' "$config_file" || return 0
+
+  sed -i -E 's/^([[:space:]]*custom_picker_binary[[:space:]]*=[[:space:]]*)hyprland-preview-share-picker([[:space:]]*(#.*)?)$/\1hyprland-share-picker\2/' "$config_file"
+  info "Using XDPH's built-in share picker; installed preview picker $picker_version is incompatible with current Hyprland monitor metadata"
 }
 
 if [[ ${1:-} == '--apply-user-configs' ]]; then
