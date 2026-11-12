@@ -13,6 +13,31 @@ readonly DEFAULT_TARGET_MARKER="$INSTALL_STATE_DIR/default-target-before-sddm"
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
 
+confirm() {
+  local prompt=$1 default=${2:-no} answer
+
+  while true; do
+    if [[ $default == yes ]]; then
+      read -r -p "$prompt [Y/n]: " answer
+    else
+      read -r -p "$prompt [y/N]: " answer
+    fi
+
+    case ${answer,,} in
+      y|yes) return 0 ;;
+      n|no) return 1 ;;
+      '')
+        if [[ $default == yes ]]; then
+          return 0
+        else
+          return 1
+        fi
+        ;;
+      *) printf 'Please answer yes or no.\n' >&2 ;;
+    esac
+  done
+}
+
 [[ $EUID -ne 0 ]] || die 'Run as your regular user, not with sudo.'
 command -v pacman >/dev/null || die 'pacman is required.'
 command -v sudo >/dev/null || die 'sudo is required.'
@@ -41,8 +66,7 @@ generic Wayland session link, those installer-managed changes will be handled
 separately below.
 NOTICE
 
-read -r -p 'Type REMOVE-OMARCHY to continue: ' answer
-[[ $answer == REMOVE-OMARCHY ]] || die 'Cancelled; no changes made.'
+confirm 'Continue with the uninstallation?' no || die 'Cancelled; no changes made.'
 
 backup="$HOME/.local/backups/omarchy-uninstall-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$backup"
@@ -76,24 +100,21 @@ if [[ -f $SDDM_ENABLED_MARKER ]] && command -v systemctl >/dev/null 2>&1; then
   if [[ -f $DEFAULT_TARGET_MARKER && $current_target == graphical.target ]]; then
     original_target=$(<"$DEFAULT_TARGET_MARKER")
     if systemctl is-enabled --quiet sddm.service 2>/dev/null; then
-      read -r -p "This installer enabled SDDM and changed the default target from $original_target to graphical.target. Keep both? [Y/n]: " keep_sddm
-      if [[ ${keep_sddm,,} == n || ${keep_sddm,,} == no ]]; then
+      if ! confirm "This installer enabled SDDM and changed the default target from $original_target to graphical.target. Keep both?" yes; then
         sudo systemctl disable sddm.service || printf 'Warning: could not disable SDDM; disable it manually if desired.\n' >&2
         sudo systemctl set-default "$original_target" || printf 'Warning: could not restore the previous default target (%s).\n' "$original_target" >&2
       else
         printf 'Keeping SDDM and graphical.target enabled.\n'
       fi
     else
-      read -r -p "SDDM is already disabled. Restore the previous default target ($original_target)? [Y/n]: " restore_target
-      if [[ ${restore_target,,} != n && ${restore_target,,} != no ]]; then
+      if confirm "SDDM is already disabled. Restore the previous default target ($original_target)?" yes; then
         sudo systemctl set-default "$original_target" || printf 'Warning: could not restore the previous default target (%s).\n' "$original_target" >&2
       else
         printf 'Leaving graphical.target unchanged.\n'
       fi
     fi
   elif systemctl is-enabled --quiet sddm.service 2>/dev/null; then
-    read -r -p 'This installer enabled SDDM. Keep it enabled after removing Omarchy? [Y/n]: ' keep_sddm
-    if [[ ${keep_sddm,,} == n || ${keep_sddm,,} == no ]]; then
+    if ! confirm 'This installer enabled SDDM. Keep it enabled after removing Omarchy?' yes; then
       sudo systemctl disable sddm.service || printf 'Warning: could not disable SDDM; disable it manually if desired.\n' >&2
     else
       printf 'Keeping SDDM enabled. It may still be useful for another installed desktop.\n'
@@ -116,8 +137,7 @@ sudo rm -f -- "$SESSION_LINK_MARKER" "$SDDM_ENABLED_MARKER" "$DEFAULT_TARGET_MAR
 sudo rmdir "$INSTALL_STATE_DIR" 2>/dev/null || true
 
 if ((${#existing_paths[@]})); then
-  read -r -p 'Remove the archived Omarchy-specific user paths? [y/N]: ' remove_user_data
-  if [[ ${remove_user_data,,} == y || ${remove_user_data,,} == yes ]]; then
+  if confirm 'Remove the archived Omarchy-specific user paths?' no; then
     for path in "${existing_paths[@]}"; do
       rm -rf -- "$HOME/$path"
     done

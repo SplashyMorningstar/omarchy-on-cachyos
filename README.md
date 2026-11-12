@@ -63,13 +63,13 @@ chmod +x install-omarchy-on-cachyos.sh uninstall-omarchy-on-cachyos.sh
 ./install-omarchy-on-cachyos.sh
 ```
 
-Review the notice and type `INSTALL` to confirm. Then authenticate with sudo once. The script upgrades the system and installs Omarchy. Pacman still shows its transaction summary and other decisions, but the installer automatically accepts only Pacman's prompt to remove a package that conflicts with the requested Omarchy packages. It does not use `--noconfirm` or automatically overwrite arbitrary files. Existing configuration files it replaces are backed up under `~/.local/backups/`.
+Review the notice and answer **Yes** at the confirmation prompt (the default is **No**). Then authenticate with sudo once. The script upgrades the system and installs Omarchy. Pacman still shows its transaction summary and other decisions, but the installer automatically accepts only Pacman's prompt to remove a package that conflicts with the requested Omarchy packages. It does not use `--noconfirm` or automatically overwrite arbitrary files. Existing configuration files it replaces are backed up under `~/.local/backups/`.
 
 When it finishes, log out and select **Omarchy (Hyprland uwsm)** in SDDM, or the Omarchy Wayland session in a compatible manager. Do not select CachyOS's generic Hyprland session; that may load CachyOS's Hyprland configuration instead. If the installer enabled SDDM, reboot to start it.
 
 The Omarchy session entry is installed at `/usr/local/share/wayland-sessions/omarchy.desktop`. For GDM, LightDM, Ly, and other managers using the standard Wayland session directory, the installer creates `/usr/share/wayland-sessions/omarchy-cachyos.desktop` when that path is available. The uninstaller removes this link if it created it.
 
-**If user setup did not complete:** From the repository directory, first update Omarchy from its session with `omarchy update`, then run `git pull` and `./install-omarchy-on-cachyos.sh --apply-user-configs`. Type `APPLY-OMARCHY-CONFIGS` to confirm. This installs missing base packages, backs up matching files before applying the installed Omarchy defaults, reapplies the current theme to Chromium-based browsers, and reruns user provisioning; it does not upgrade Omarchy. If no display manager is detected, it also offers the explicit SDDM enablement option.
+**If user setup did not complete:** From the repository directory, first update Omarchy from its session with `omarchy update`, then run `git pull` and `./install-omarchy-on-cachyos.sh --apply-user-configs`. Answer **Yes** at the confirmation prompt (default: **No**) to apply Omarchy's defaults. This installs missing base packages, backs up matching files before applying the installed Omarchy defaults, reapplies the current theme to Chromium-based browsers, and reruns user provisioning; it does not upgrade Omarchy. If no display manager is detected, it also asks whether to enable SDDM; the default is **No**.
 
 **If Chromium does not follow theme changes on an existing installation:** Run `./install-omarchy-on-cachyos.sh --sync-browser-theme` from the repository directory. This initializes the managed policy directory if it is missing and reapplies the current theme without replacing user configuration files.
 
@@ -83,7 +83,7 @@ From the repository directory, run as your regular user:
 ./uninstall-omarchy-on-cachyos.sh
 ```
 
-Type `REMOVE-OMARCHY` to confirm. The uninstaller archives Omarchy-specific user data and removes packages named `omarchy` or `omarchy-*`, the pacman repository, and its signing key. It does not remove existing desktops or shared dependencies, preserves Hyprland configuration that may belong to CachyOS, removes the compatibility session link if the installer created it, and **does not modify the bootloader**. If the installer enabled SDDM or changed the default target, the uninstaller asks whether to keep those changes.
+Answer **Yes** at the confirmation prompt (default: **No**) to continue. The uninstaller archives Omarchy-specific user data and removes packages named `omarchy` or `omarchy-*`, the pacman repository, and its signing key. It does not remove existing desktops or shared dependencies, preserves Hyprland configuration that may belong to CachyOS, removes the compatibility session link if the installer created it, and **does not modify the bootloader**. If the installer enabled SDDM or changed the default target, it asks whether to keep those changes (default: **Yes**). Removing the archived user paths is a separate confirmation (default: **No**).
 
 ## Important limitations
 
