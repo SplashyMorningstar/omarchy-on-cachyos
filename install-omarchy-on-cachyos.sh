@@ -23,6 +23,31 @@ PACMAN_CONF_CHANGED=false
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
 
+confirm() {
+  local prompt=$1 default=${2:-no} answer
+
+  while true; do
+    if [[ $default == yes ]]; then
+      read -r -p "$prompt [Y/n]: " answer
+    else
+      read -r -p "$prompt [y/N]: " answer
+    fi
+
+    case ${answer,,} in
+      y|yes) return 0 ;;
+      n|no) return 1 ;;
+      '')
+        if [[ $default == yes ]]; then
+          return 0
+        else
+          return 1
+        fi
+        ;;
+      *) printf 'Please answer yes or no.\n' >&2 ;;
+    esac
+  done
+}
+
 stop_sudo_keepalive() {
   if [[ -n $SUDO_KEEPALIVE_PID ]]; then
     kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
@@ -282,7 +307,7 @@ register_wayland_session() {
 }
 
 offer_enable_sddm_if_no_manager() {
-  local answer default_target
+  local default_target
   [[ ${1:-unknown} == none ]] || return 0
   [[ -d /run/systemd/system ]] || {
     printf 'No systemd display manager was detected. Configure a Wayland-capable login manager manually.\n' >&2
@@ -292,12 +317,11 @@ offer_enable_sddm_if_no_manager() {
   cat <<'SDDM_NOTICE'
 No enabled display manager was detected. Omarchy's package installs SDDM as a
 dependency, but this installer will not enable a login manager without consent.
-Type ENABLE-SDDM to enable SDDM for the next boot. If needed, this also changes
-the system default target to graphical.target. Press Enter to leave SDDM
-disabled and configure your preferred login manager yourself.
+Enabling SDDM may also change the system default target to graphical.target.
+Answer No or press Enter to leave SDDM disabled and configure your preferred
+login manager yourself.
 SDDM_NOTICE
-  read -r -p 'Enable SDDM at boot? ' answer
-  if [[ $answer == ENABLE-SDDM ]]; then
+  if confirm 'Enable SDDM for the next boot?' no; then
     default_target=$(systemctl get-default 2>/dev/null || true)
     [[ -n $default_target ]] || {
       printf 'Warning: could not determine the system default target; SDDM was not enabled.\n' >&2
@@ -353,8 +377,7 @@ This copies Omarchy's shipped defaults from /etc/skel into your existing home.
 Files with matching paths will be replaced. A backup of every existing file
 that would be replaced is made first. Your unrelated files are left in place.
 WARNING
-    read -r -p 'Type APPLY-OMARCHY-CONFIGS to continue: ' answer
-    [[ $answer == APPLY-OMARCHY-CONFIGS ]] || die 'Cancelled; no user files changed.'
+    confirm "Apply Omarchy's defaults to this home directory?" no || die 'Cancelled; no user files changed.'
   fi
 
   local package_list
@@ -549,8 +572,7 @@ case $display_manager in
     ;;
 esac
 
-read -r -p 'Type INSTALL to continue: ' answer
-[[ $answer == INSTALL ]] || die 'Cancelled; no changes made.'
+confirm 'Continue with the installation?' no || die 'Cancelled; no changes made.'
 
 start_sudo_keepalive
 
