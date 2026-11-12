@@ -395,10 +395,10 @@ WARNING
   # Keep this to the user files only. Upstream omarchy-reinstall-configs also
   # refreshes Limine/Plymouth, which is deliberately outside this installer's scope.
   cp -a /etc/skel/. "$HOME/"
-  configure_legacy_screencast_picker
   printf 'Previous matching files backed up to: %s\n' "$backup"
 
   omarchy-provision-user --force
+  configure_legacy_screencast_picker
 
   if ! ensure_chromium_theme_policy; then
     printf 'Warning: Chromium theme policy could not be initialized.\n' >&2
