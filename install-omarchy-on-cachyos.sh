@@ -19,6 +19,8 @@ readonly DEFAULT_TARGET_MARKER="$INSTALL_STATE_DIR/default-target-before-sddm"
 SUDO_KEEPALIVE_PID=""
 PACMAN_CONF_BACKUP=""
 PACMAN_CONF_CHANGED=false
+LIMINE_UPDATE_REQUIRED=false
+LIMINE_SNAPSHOT_SYNC_TARGETED=false
 
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
@@ -117,6 +119,132 @@ ensure_chromium_theme_policy() {
 
   info 'Creating Omarchy managed Chromium policy directory'
   sudo env OMARCHY_PATH=/usr/share/omarchy bash "$policy_setup"
+}
+
+configure_limine_update_compatibility() {
+  local hook_config=/etc/mkinitcpio.conf.d/10-limine-snapper-sync.conf
+  local limine_config=/etc/default/limine
+  local boot_config=/boot/limine.conf
+  local backup temporary_conf current_target
+
+  if command -v limine-mkinitcpio >/dev/null 2>&1 &&
+    sudo test -r "$hook_config" &&
+    sudo grep -Fxq 'HOOKS+=(sd-btrfs-overlayfs)' "$hook_config"; then
+    backup="${hook_config}.before-omarchy.$(date +%Y%m%d-%H%M%S)"
+    sudo cp -a "$hook_config" "$backup" || die "Could not back up $hook_config."
+    temporary_conf=$(mktemp)
+    if ! awk '
+      $0 == "HOOKS+=(sd-btrfs-overlayfs)" {
+        print "# Select the Limine snapshot overlay hook that matches Omarchy initramfs."
+        print "if [[ \" ${HOOKS[*]:-} \" == *\" systemd \"* ]]; then"
+        print "  [[ \" ${HOOKS[*]:-} \" == *\" sd-btrfs-overlayfs \"* ]] || HOOKS+=(sd-btrfs-overlayfs)"
+        print "elif [[ \" ${HOOKS[*]:-} \" != *\" btrfs-overlayfs \"* ]]; then"
+        print "  HOOKS+=(btrfs-overlayfs)"
+        print "fi"
+        replaced = 1
+        next
+      }
+      { print }
+      END { if (!replaced) exit 1 }
+    ' "$hook_config" >"$temporary_conf"; then
+      rm -f -- "$temporary_conf"
+      die "Could not adapt the Limine snapshot hook in $hook_config."
+    fi
+    sudo install -m 644 -o root -g root "$temporary_conf" "$hook_config" || die "Could not update $hook_config."
+    rm -f -- "$temporary_conf"
+    printf 'Saved incompatible Limine hook configuration: %s\n' "$backup"
+    LIMINE_UPDATE_REQUIRED=true
+  fi
+
+  if ! command -v limine-entry-tool >/dev/null 2>&1 ||
+    ! sudo test -r "$boot_config" ||
+    ! sudo grep -Eq '^/[+]?CachyOS([[:space:]]|$)' "$boot_config"; then
+    return 0
+  fi
+
+  if sudo test -r "$limine_config"; then
+    current_target=$(sudo awk -F= '
+      /^[[:space:]]*TARGET_OS_NAME[[:space:]]*=/ {
+        value = $2
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        gsub(/^"|"$/, "", value)
+        target = value
+      }
+      END { print target }
+    ' "$limine_config") || die "Could not read $limine_config."
+  else
+    current_target=""
+  fi
+
+  if [[ $current_target == CachyOS ]]; then
+    LIMINE_SNAPSHOT_SYNC_TARGETED=true
+    return 0
+  fi
+  if [[ -n $current_target && $current_target != Omarchy ]]; then
+    printf 'Warning: keeping the custom Limine target %q; it does not match the detected CachyOS boot entry.\n' "$current_target" >&2
+    return 0
+  fi
+
+  if sudo test -e "$limine_config"; then
+    backup="${limine_config}.before-omarchy.$(date +%Y%m%d-%H%M%S)"
+    sudo cp -a "$limine_config" "$backup" || die "Could not back up $limine_config."
+    printf 'Saved Limine settings: %s\n' "$backup"
+  fi
+  temporary_conf=$(mktemp)
+  if sudo test -r "$limine_config"; then
+    awk '
+      /^[[:space:]]*TARGET_OS_NAME[[:space:]]*=/ {
+        if (!replaced) print "TARGET_OS_NAME=\"CachyOS\""
+        replaced = 1
+        next
+      }
+      { print }
+      END { if (!replaced) print "TARGET_OS_NAME=\"CachyOS\"" }
+    ' "$limine_config" >"$temporary_conf" || die "Could not prepare $limine_config."
+  else
+    printf 'TARGET_OS_NAME="CachyOS"\n' >"$temporary_conf"
+  fi
+  sudo install -m 644 -o root -g root "$temporary_conf" "$limine_config" || die "Could not update $limine_config."
+  rm -f -- "$temporary_conf"
+  LIMINE_UPDATE_REQUIRED=true
+  LIMINE_SNAPSHOT_SYNC_TARGETED=true
+  info 'Pointed Limine snapshot synchronization at the existing CachyOS boot entry'
+}
+
+rebuild_limine_boot_files() {
+  local build_log sync_log
+  if [[ $LIMINE_UPDATE_REQUIRED == true ]]; then
+    if ! command -v limine-mkinitcpio >/dev/null 2>&1; then
+      printf 'Limine configuration changed, but limine-mkinitcpio is unavailable. Do not reboot until boot files are rebuilt.\n' >&2
+      return 1
+    fi
+
+    info 'Rebuilding Limine boot files with the compatible initramfs hooks'
+    build_log=$(mktemp)
+    if ! sudo limine-mkinitcpio 2>&1 | tee "$build_log"; then
+      printf 'Limine kernel image rebuild failed. Do not reboot until it is resolved. Log: %s\n' "$build_log" >&2
+      return 1
+    fi
+    if grep -q 'mkinitcpio failed for kernel' "$build_log"; then
+      printf 'At least one Limine kernel image failed to rebuild. Do not reboot until it is resolved. Log: %s\n' "$build_log" >&2
+      return 1
+    fi
+    rm -f -- "$build_log"
+  fi
+
+  if [[ $LIMINE_SNAPSHOT_SYNC_TARGETED == true ]] && command -v limine-snapper-sync >/dev/null 2>&1; then
+    info 'Synchronizing Snapper recovery entries with the CachyOS Limine entry'
+    sync_log=$(mktemp)
+    if ! sudo limine-snapper-sync 2>&1 | tee "$sync_log"; then
+      printf 'Limine snapshot synchronization failed. Review the boot entries before rebooting. Log: %s\n' "$sync_log" >&2
+      return 1
+    fi
+    if grep -q "Target OS name .* not found" "$sync_log"; then
+      printf 'Limine could not find its CachyOS target entry. Review the boot configuration before rebooting. Log: %s\n' "$sync_log" >&2
+      return 1
+    fi
+    rm -f -- "$sync_log"
+  fi
 }
 
 seed_sddm_last_user() {
@@ -590,13 +718,36 @@ info 'Importing and locally trusting the Omarchy repository signing key'
 sudo pacman-key --recv-keys "$OMARCHY_KEY_FINGERPRINT" --keyserver keys.openpgp.org
 sudo pacman-key --lsign-key "$OMARCHY_KEY_FINGERPRINT"
 
+# Put Omarchy first so packages it customizes (notably Quickshell) do not get
+# silently replaced by a same-named CachyOS package. CachyOS remains the source
+# for packages Omarchy does not publish, including Hyprland.
+info 'Adding the Omarchy repository before the existing CachyOS repositories'
 PACMAN_CONF_CHANGED=true
-sudo tee -a "$PACMAN_CONF" >/dev/null <<EOF
+temporary_conf=$(mktemp)
+awk -v server="$OMARCHY_REPO" '
+  function print_omarchy_repo() {
+    print "[omarchy]"
+    print "SigLevel = Required DatabaseOptional"
+    print "Server = " server
+    print ""
+  }
+  /^\[[^]]+\]/ && $0 != "[options]" && !inserted {
+    print_omarchy_repo()
+    inserted = 1
+  }
+  { print }
+  END {
+    if (!inserted) print_omarchy_repo()
+  }
+' "$PACMAN_CONF" >"$temporary_conf" || die 'Could not prepare pacman configuration.'
+sudo install -m 644 -o root -g root "$temporary_conf" "$PACMAN_CONF"
+rm -f -- "$temporary_conf"
 
-[omarchy]
-SigLevel = Required DatabaseOptional
-Server = $OMARCHY_REPO
-EOF
+repo_order=$(pacman-conf --repo-list) || die 'Could not read the configured pacman repository order.'
+first_repo=$(awk 'NF { print; exit }' <<<"$repo_order")
+[[ $first_repo == omarchy ]] || die 'Omarchy is not the first enabled pacman repository; restoring the previous pacman configuration.'
+
+configure_limine_update_compatibility
 
 info 'Synchronizing the system and installing Omarchy (full Arch upgrade required)'
 info 'Refreshing package databases and checking the official stable Omarchy release'
@@ -636,6 +787,10 @@ if (( $(vercmp "$installed_omarchy" "$MIN_OMARCHY_VERSION") < 0 )); then
   die "Omarchy $installed_omarchy was installed, below the required $MIN_OMARCHY_VERSION. Keep the [omarchy] repository configured and resolve the package issue before continuing."
 fi
 info "Installed Omarchy package version: $installed_omarchy"
+
+if ! rebuild_limine_boot_files; then
+  die 'Limine boot-file preparation did not complete. Do not reboot until the reported issue is fixed.'
+fi
 
 if [[ -r $OMARCHY_SESSION_LOCAL || -r $OMARCHY_SESSION_STANDARD ]]; then
   printf '\nOmarchy Wayland session entry is installed.\n'
