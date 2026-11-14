@@ -1,12 +1,14 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# Uses Omarchy's signed stable binary repository (rather than patching its
-# internal install scripts), so `omarchy update` remains the supported updater.
+# Uses Omarchy's signed edge binary repository so rolling CachyOS packages
+# (including modern Hyprland versions and plugins) stay synchronized, while
+# preserving `omarchy update` as the supported updater.
 
 readonly OMARCHY_KEY_FINGERPRINT="40DFB630FF42BCFFB047046CF0134EE680CAC571"
-readonly OMARCHY_REPO="https://pkgs.omarchy.org/stable/\$arch"
+readonly OMARCHY_REPO="https://pkgs.omarchy.org/edge/\$arch"
 readonly MIN_OMARCHY_VERSION="4.5.0"
+readonly MIN_OMARCHY_DEV_VERSION="4.0.0.r7000"
 readonly PACMAN_CONF="/etc/pacman.conf"
 readonly OMARCHY_SESSION_LOCAL="/usr/local/share/wayland-sessions/omarchy.desktop"
 readonly OMARCHY_SESSION_STANDARD="/usr/share/wayland-sessions/omarchy.desktop"
@@ -493,8 +495,8 @@ SDDM_NOTICE
 sync_existing_user_configs() {
   local confirmed=${1:-no}
   [[ $EUID -ne 0 ]] || die 'Run this as the regular desktop user, not with sudo.'
-  pacman -Q omarchy >/dev/null 2>&1 || die 'Omarchy is not installed yet.'
-  pacman -Q omarchy-settings >/dev/null 2>&1 || die 'The Omarchy settings package is not installed.'
+  pacman -Q omarchy >/dev/null 2>&1 || pacman -Q omarchy-dev >/dev/null 2>&1 || die 'Omarchy is not installed yet.'
+  pacman -Q omarchy-settings >/dev/null 2>&1 || pacman -Q omarchy-settings-dev >/dev/null 2>&1 || die 'The Omarchy settings package is not installed.'
   [[ -d /etc/skel ]] || die 'The system user skeleton (/etc/skel) is missing.'
   command -v omarchy-provision-user >/dev/null 2>&1 || die 'Omarchy user provisioning is unavailable.'
 
@@ -603,7 +605,7 @@ if [[ ${1:-} == '--sync-browser-theme' ]]; then
   [[ $EUID -ne 0 ]] || die 'Run this as the regular user, not with sudo.'
   command -v sudo >/dev/null || die 'sudo is required.'
   command -v pacman >/dev/null || die 'pacman is required.'
-  pacman -Q omarchy >/dev/null 2>&1 || die 'Omarchy is not installed.'
+  pacman -Q omarchy >/dev/null 2>&1 || pacman -Q omarchy-dev >/dev/null 2>&1 || die 'Omarchy is not installed.'
   command -v omarchy-theme-set-browser >/dev/null || die 'Omarchy browser theme integration is unavailable.'
 
   start_sudo_keepalive
@@ -618,7 +620,7 @@ if [[ ${1:-} == '--fix-sddm-first-login' ]]; then
   [[ $EUID -ne 0 ]] || die 'Run this as the regular user, not with sudo.'
   command -v sudo >/dev/null || die 'sudo is required.'
   command -v pacman >/dev/null || die 'pacman is required.'
-  pacman -Q omarchy >/dev/null 2>&1 || die 'Omarchy is not installed.'
+  pacman -Q omarchy >/dev/null 2>&1 || pacman -Q omarchy-dev >/dev/null 2>&1 || die 'Omarchy is not installed.'
   command -v sddm >/dev/null || die 'SDDM is not installed.'
 
   start_sudo_keepalive
@@ -657,16 +659,17 @@ fi
 
 display_manager=$(detect_display_manager)
 
-if installed_omarchy=$(pacman -Q omarchy 2>/dev/null); then
-  installed_omarchy=${installed_omarchy#omarchy }
-  die "Omarchy $installed_omarchy is already installed. Log into Omarchy and run 'omarchy update' to upgrade it safely."
+if installed_omarchy=$(pacman -Q omarchy-dev 2>/dev/null || pacman -Q omarchy 2>/dev/null); then
+  installed_name=$(awk '{print $1}' <<<"$installed_omarchy")
+  installed_version=$(awk '{print $2}' <<<"$installed_omarchy")
+  die "Omarchy ($installed_name $installed_version) is already installed. Log into Omarchy and run 'omarchy update' to upgrade it safely."
 fi
 if grep -q '^\[omarchy\]' "$PACMAN_CONF"; then
   die "An [omarchy] repository is already configured in $PACMAN_CONF. Inspect it and rerun; no changes made."
 fi
 
 cat <<'NOTICE'
-This installs Omarchy's official stable packages on this existing CachyOS
+This installs Omarchy's official edge packages on this existing CachyOS
 installation. It does NOT format or repartition disks and does NOT uninstall
 your existing desktop or switch an enabled display manager. Omarchy's upstream
 package depends on SDDM, so SDDM will be installed if it is missing.
@@ -749,17 +752,32 @@ first_repo=$(awk 'NF { print; exit }' <<<"$repo_order")
 configure_limine_update_compatibility
 
 info 'Synchronizing the system and installing Omarchy (full Arch upgrade required)'
-info 'Refreshing package databases and checking the official stable Omarchy release'
+info 'Refreshing package databases and checking the official Omarchy edge release'
 sudo pacman -Syy
-package_metadata=$(LC_ALL=C pacman -Si omarchy) || die 'Could not find the Omarchy package in the configured repositories.'
+package_name=""
+if package_metadata=$(LC_ALL=C pacman -Si omarchy-dev 2>/dev/null); then
+  package_name="omarchy-dev"
+elif package_metadata=$(LC_ALL=C pacman -Si omarchy 2>/dev/null); then
+  package_name="omarchy"
+else
+  die 'Could not find omarchy-dev or omarchy in the configured repositories.'
+fi
+
 package_repo=$(awk -F: '$1 ~ /^Repository[[:space:]]*$/ { sub(/^[[:space:]]+/, "", $2); sub(/[[:space:]]+$/, "", $2); print $2; exit }' <<<"$package_metadata")
 repo_version=$(awk -F: '$1 ~ /^Version[[:space:]]*$/ { sub(/^[[:space:]]+/, "", $2); sub(/[[:space:]]+$/, "", $2); print $2; exit }' <<<"$package_metadata")
 [[ $package_repo == omarchy ]] || die "Expected the official [omarchy] repository, found '${package_repo:-none}'."
-[[ -n $repo_version ]] || die 'Could not determine the Omarchy stable package version.'
-if (( $(vercmp "$repo_version" "$MIN_OMARCHY_VERSION") < 0 )); then
-  die "The official stable repository offers Omarchy $repo_version; this installer requires $MIN_OMARCHY_VERSION or newer. No system upgrade was started."
+[[ -n $repo_version ]] || die 'Could not determine the Omarchy package version.'
+
+if [[ $package_name == "omarchy-dev" ]]; then
+  if (( $(vercmp "$repo_version" "$MIN_OMARCHY_DEV_VERSION") < 0 )); then
+    die "The official edge repository offers $package_name $repo_version; this installer requires $MIN_OMARCHY_DEV_VERSION or newer. No system upgrade was started."
+  fi
+else
+  if (( $(vercmp "$repo_version" "$MIN_OMARCHY_VERSION") < 0 )); then
+    die "The official repository offers $package_name $repo_version; this installer requires $MIN_OMARCHY_VERSION or newer. No system upgrade was started."
+  fi
 fi
-info "Official stable Omarchy version selected: $repo_version (minimum: $MIN_OMARCHY_VERSION; newer stable versions are accepted)"
+info "Official Omarchy edge version selected: $package_name $repo_version"
 
 pacman_args=()
 skel_alacritty='/etc/skel/.config/alacritty/alacritty.toml'
@@ -777,15 +795,16 @@ EOF
   pacman_args+=(--overwrite "${skel_alacritty#/}")
 fi
 
-sudo pacman -Syu --needed --ask=4 "${pacman_args[@]}" omarchy
+if [[ $package_name == "omarchy-dev" ]]; then
+  sudo pacman -Syu --needed --ask=4 "${pacman_args[@]}" omarchy-dev omarchy-settings-dev
+else
+  sudo pacman -Syu --needed --ask=4 "${pacman_args[@]}" omarchy
+fi
 
 PACMAN_CONF_CHANGED=false
-installed_omarchy=$(pacman -Q omarchy | awk '{print $2}')
-[[ -n $installed_omarchy ]] || die 'Omarchy was not found after the package transaction.'
-if (( $(vercmp "$installed_omarchy" "$MIN_OMARCHY_VERSION") < 0 )); then
-  die "Omarchy $installed_omarchy was installed, below the required $MIN_OMARCHY_VERSION. Keep the [omarchy] repository configured and resolve the package issue before continuing."
-fi
-info "Installed Omarchy package version: $installed_omarchy"
+installed_omarchy=$(pacman -Q "$package_name" 2>/dev/null | awk '{print $2}')
+[[ -n $installed_omarchy ]] || die "Package $package_name was not found after the package transaction."
+info "Installed Omarchy package version: $package_name $installed_omarchy"
 
 if ! rebuild_limine_boot_files; then
   die 'Limine boot-file preparation did not complete. Do not reboot until the reported issue is fixed.'
