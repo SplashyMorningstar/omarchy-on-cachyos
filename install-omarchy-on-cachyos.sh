@@ -1,7 +1,6 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# CachyOS adaptation inspired by https://github.com/mroboff/omarchy-on-cachyos
 # Uses Omarchy's signed stable binary repository (rather than patching its
 # internal install scripts), so `omarchy update` remains the supported updater.
 
