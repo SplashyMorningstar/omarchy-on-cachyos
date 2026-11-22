@@ -1,6 +1,6 @@
-# Omarchy on CachyOS (experimental)
+# Omarchy on CachyOS
 
-An experimental installer for Omarchy on an existing CachyOS x86_64 system. It uses Omarchy's official edge packages (`omarchy-dev`) to keep rolling CachyOS and Arch packages synchronized; it is **not** an official Omarchy installer or a replacement for its ISO.
+An unofficial installer and integration tool for Omarchy on an existing CachyOS x86_64 system. It uses Omarchy's official edge packages (`omarchy-dev`) to keep rolling CachyOS and Arch packages synchronized; it is **not** an official Omarchy installer or a replacement for its ISO.
 
 The installer prefers Omarchy packages when repositories overlap; CachyOS supplies packages Omarchy does not publish, including Hyprland. It performs a full system upgrade, installs Omarchy's base packages, backs up and applies user defaults, and provisions the session. If Limine is present, it selects a snapshot hook compatible with the initramfs, targets the existing CachyOS entry when available, rebuilds boot files, and stops on build errors. Relevant system config files are backed up. The installer does not downgrade already-installed packages just because repository priority changes.
 
@@ -70,7 +70,7 @@ The uninstaller asks for confirmation, archives Omarchy-specific user data, and 
 
 ## Important limitations
 
-- Experimental and unofficial. Keep an external backup; Btrfs/Snapper alone do not guarantee recovery.
+- Unofficial and community-driven. Keep an external backup; Btrfs/Snapper alone do not guarantee recovery.
 - Use `omarchy update` from the Omarchy session. Do not bypass its migration flow by rerunning this installer or using `pacman -Syu` directly.
 - If Limine is used, `sudo mkinitcpio -P` alone does not refresh Limine's UKIs. Use `sudo limine-mkinitcpio`, then verify with `limine-list` and `limine-snapper-info`. Do not reboot after a reported build error.
 - The installer does not format disks, remove other desktops, install a bootloader, or change firmware boot order. Custom Limine entry names and snapshot recovery remain the user's responsibility.
