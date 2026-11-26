@@ -146,19 +146,36 @@ if ((${#existing_paths[@]})); then
   fi
 fi
 
-if grep -q '^\[omarchy\]' "$PACMAN_CONF"; then
-  info 'Removing the [omarchy] repository configuration'
+if grep -Eq '^\[(omarchy|omarchy-cachyos-pins)\]' "$PACMAN_CONF"; then
+  info 'Removing the [omarchy] and version guard repository configuration'
   conf_backup="${PACMAN_CONF}.before-omarchy-uninstall.$(date +%Y%m%d-%H%M%S)"
   sudo cp -a "$PACMAN_CONF" "$conf_backup"
   temporary_conf=$(mktemp)
   awk '
-    /^\[[^]]+\]/ { in_omarchy = ($0 == "[omarchy]"); if (!in_omarchy) print; next }
+    /^\[[^]]+\]/ {
+      in_omarchy = ($0 == "[omarchy]" || $0 == "[omarchy-cachyos-pins]")
+      if (!in_omarchy) print
+      next
+    }
     !in_omarchy { print }
   ' "$PACMAN_CONF" >"$temporary_conf"
   sudo install -m 644 -o root -g root "$temporary_conf" "$PACMAN_CONF"
   rm -f "$temporary_conf"
   printf 'Saved pacman.conf backup: %s\n' "$conf_backup"
 fi
+
+if [[ -e /usr/local/bin/omarchy-cachyos-version-check ]]; then
+  info 'Removing the CachyOS/Omarchy version guard'
+  sudo rm -f -- /usr/local/bin/omarchy-cachyos-version-check
+fi
+for hook_file in \
+  /etc/skel/.config/omarchy/hooks/post-update.d/omarchy-cachyos-version-check \
+  "$HOME/.config/omarchy/hooks/post-update.d/omarchy-cachyos-version-check"; do
+  [[ -e $hook_file ]] && sudo rm -f -- "$hook_file"
+done
+for state_path in "$INSTALL_STATE_DIR/version-check.conf" "$INSTALL_STATE_DIR/pins"; do
+  [[ -e $state_path ]] && sudo rm -rf -- "$state_path"
+done
 
 if sudo pacman-key --list-keys "$OMARCHY_KEY_FINGERPRINT" >/dev/null 2>&1; then
   info 'Removing the locally trusted Omarchy signing key'

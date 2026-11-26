@@ -17,6 +17,14 @@ readonly INSTALL_STATE_DIR="/var/lib/omarchy-on-cachyos"
 readonly SESSION_LINK_MARKER="$INSTALL_STATE_DIR/created-wayland-session-link"
 readonly SDDM_ENABLED_MARKER="$INSTALL_STATE_DIR/enabled-sddm"
 readonly DEFAULT_TARGET_MARKER="$INSTALL_STATE_DIR/default-target-before-sddm"
+readonly INSTALLER_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly VERSION_CHECK_SOURCE="$INSTALLER_DIR/omarchy-cachyos-version-check.sh"
+readonly VERSION_CHECK_BIN="/usr/local/bin/omarchy-cachyos-version-check"
+readonly VERSION_CHECK_CONFIG="$INSTALL_STATE_DIR/version-check.conf"
+readonly PINS_DIR="$INSTALL_STATE_DIR/pins"
+readonly PINS_REPO_NAME="omarchy-cachyos-pins"
+readonly SKEL_POST_UPDATE_HOOK="/etc/skel/.config/omarchy/hooks/post-update.d/omarchy-cachyos-version-check"
+readonly USER_POST_UPDATE_HOOK="$HOME/.config/omarchy/hooks/post-update.d/omarchy-cachyos-version-check"
 SUDO_KEEPALIVE_PID=""
 PACMAN_CONF_BACKUP=""
 PACMAN_CONF_CHANGED=false
@@ -592,6 +600,154 @@ configure_legacy_screencast_picker() {
   info "Using XDPH's built-in share picker; installed preview picker $picker_version is incompatible with current Hyprland monitor metadata"
 }
 
+# CachyOS has to stay the first normal repository so its optimized builds keep
+# being used. A small local repository goes before it only for packages that
+# are deliberately newer than the CachyOS candidate (or must track [omarchy]).
+# This is what stops pacman's "local is newer than ..." warnings without a
+# downgrade, and the post-update hook keeps the pin set correct over time.
+install_version_guard() {
+  [[ -r $VERSION_CHECK_SOURCE ]] || die "Version guard script not found: $VERSION_CHECK_SOURCE"
+
+  info 'Installing the CachyOS/Omarchy version guard'
+  sudo install -d -m 755 -o root -g root "$INSTALL_STATE_DIR" ||
+    die "Could not create $INSTALL_STATE_DIR."
+  sudo install -d -m 755 -o root -g root "$PINS_DIR" ||
+    die "Could not create $PINS_DIR."
+
+  if [[ -r $VERSION_CHECK_CONFIG ]]; then
+    info "Keeping the existing version guard policy: $VERSION_CHECK_CONFIG"
+  else
+    version_check_config_tmp=$(mktemp)
+    cat >"$version_check_config_tmp" <<'CONFIG'
+# <package> <pin|follow>
+# pin: never upgrade from [omarchy]; keep CachyOS upgrades while versions match.
+# follow: upgrade from [omarchy] when the local version is older.
+#
+# hyprland is pinned because Omarchy's titlebar plugin is tied to its 0.57.2
+# build. The preview picker tracks Omarchy's fixed (>= 0.3.0) release, which
+# understands current Hyprland monitor metadata.
+hyprland pin
+hyprland-preview-share-picker follow
+CONFIG
+    sudo install -m 644 -o root -g root "$version_check_config_tmp" "$VERSION_CHECK_CONFIG" ||
+      die 'Could not install the version guard configuration.'
+    rm -f -- "$version_check_config_tmp"
+  fi
+
+  sudo install -m 755 -o root -g root "$VERSION_CHECK_SOURCE" "$VERSION_CHECK_BIN" ||
+    die 'Could not install the version guard script.'
+
+  post_update_hook_tmp=$(mktemp)
+  cat >"$post_update_hook_tmp" <<'HOOK'
+#!/bin/bash
+# Keep the CachyOS-first pin set in sync after every `omarchy update`.
+command -v omarchy-cachyos-version-check >/dev/null 2>&1 || exit 0
+omarchy-cachyos-version-check || true
+HOOK
+  sudo install -d -m 755 -o root -g root /etc/skel/.config/omarchy/hooks/post-update.d ||
+    die 'Could not create the system-wide post-update hook directory.'
+  sudo install -m 644 -o root -g root "$post_update_hook_tmp" "$SKEL_POST_UPDATE_HOOK" ||
+    die 'Could not install the system-wide post-update hook.'
+  mkdir -p "${USER_POST_UPDATE_HOOK%/*}" || die 'Could not create the user post-update hook directory.'
+  install -m 644 "$post_update_hook_tmp" "$USER_POST_UPDATE_HOOK" ||
+    die 'Could not install the user post-update hook.'
+  rm -f -- "$post_update_hook_tmp"
+
+  # pacman -Syy runs before the guard has pinned anything, so the file:// repo
+  # needs a valid (empty) database from the very first transaction.
+  if [[ ! -e $PINS_DIR/$PINS_REPO_NAME.db.tar.gz ]]; then
+    empty_db_tmp=$(mktemp -d)
+    tar -czf "$empty_db_tmp/$PINS_REPO_NAME.db.tar.gz" --files-from /dev/null ||
+      die 'Could not create the initial pin repository database.'
+    ln -sf "$PINS_REPO_NAME.db.tar.gz" "$empty_db_tmp/$PINS_REPO_NAME.db" ||
+      die 'Could not link the initial pin repository database.'
+    sudo install -m 644 -o root -g root "$empty_db_tmp"/* "$PINS_DIR/" ||
+      die 'Could not install the initial pin repository database.'
+    rm -rf -- "$empty_db_tmp"
+  fi
+}
+
+# Always build the final layout from the pre-install backup: pins first,
+# CachyOS untouched as the default, Omarchy last. A rerun cannot duplicate
+# either block this way.
+write_version_guard_pacman_conf() {
+  [[ -n $PACMAN_CONF_BACKUP && -f $PACMAN_CONF_BACKUP ]] ||
+    die 'No pacman.conf backup is available to apply the final repository order.'
+  temporary_conf=$(mktemp)
+  awk -v pins_repo="$PINS_REPO_NAME" -v omarchy_server="$OMARCHY_REPO" '
+    function print_pins_repo() {
+      print "[" pins_repo "]"
+      print "SigLevel = Optional TrustAll"
+      print "Server = file:///var/lib/omarchy-on-cachyos/pins"
+      print ""
+    }
+    function print_omarchy_repo() {
+      print "[omarchy]"
+      print "SigLevel = Required DatabaseOptional"
+      print "Server = " omarchy_server
+      print ""
+    }
+    /^\[[^]]+\]/ {
+      if ($0 == "[" pins_repo "]" || $0 == "[omarchy]") {
+        skip_repo = 1
+        next
+      }
+      skip_repo = 0
+      if ($0 != "[options]" && !pins_inserted) {
+        print_pins_repo()
+        pins_inserted = 1
+      }
+    }
+    !skip_repo { print }
+    END {
+      if (!pins_inserted) print_pins_repo()
+      print_omarchy_repo()
+    }
+  ' "$PACMAN_CONF_BACKUP" >"$temporary_conf" ||
+    die 'Could not prepare the final pacman configuration.'
+  sudo install -m 644 -o root -g root "$temporary_conf" "$PACMAN_CONF" ||
+    die 'Could not apply the final pacman configuration.'
+  rm -f -- "$temporary_conf"
+
+  repo_order=$(pacman-conf --repo-list) || die 'Could not read the configured pacman repository order.'
+  first_repo=$(awk 'NF { print; exit }' <<<"$repo_order")
+  [[ $first_repo == "$PINS_REPO_NAME" ]] ||
+    die "The pin repository is not first in pacman.conf (found '$first_repo'); restoring the previous configuration."
+  grep -qx 'omarchy' <<<"$repo_order" ||
+    die 'The [omarchy] repository is missing after configuration; restoring the previous configuration.'
+  last_repo=$(awk 'NF { last = $0 } END { print last }' <<<"$repo_order")
+  [[ $last_repo == omarchy ]] ||
+    die "Omarchy is not the last repository in pacman.conf (found '$last_repo'); restoring the previous configuration."
+}
+
+run_version_guard() {
+  "$VERSION_CHECK_BIN" || die 'Could not synchronize the version guard.'
+}
+
+configure_version_sync() {
+  install_version_guard
+  write_version_guard_pacman_conf
+  run_version_guard
+}
+
+if [[ ${1:-} == '--apply-version-guard' ]]; then
+  [[ $# -eq 1 ]] || die 'Usage: install-omarchy-on-cachyos.sh --apply-version-guard'
+  [[ $EUID -ne 0 ]] || die 'Run this as the regular user, not with sudo.'
+  command -v sudo >/dev/null || die 'sudo is required.'
+  command -v pacman >/dev/null || die 'pacman is required.'
+
+  start_sudo_keepalive
+  PACMAN_CONF_BACKUP="${PACMAN_CONF}.before-version-guard.$(date +%Y%m%d-%H%M%S)"
+  sudo cp -a "$PACMAN_CONF" "$PACMAN_CONF_BACKUP" ||
+    die "Could not back up $PACMAN_CONF."
+  printf 'Saved: %s\n' "$PACMAN_CONF_BACKUP"
+  PACMAN_CONF_CHANGED=true
+  configure_version_sync
+  PACMAN_CONF_CHANGED=false
+  info 'Version guard applied. CachyOS remains the default repository.'
+  exit 0
+fi
+
 if [[ ${1:-} == '--apply-user-configs' ]]; then
   [[ $# -eq 1 ]] || die 'Usage: install-omarchy-on-cachyos.sh --apply-user-configs'
   display_manager=$(detect_display_manager)
@@ -720,34 +876,13 @@ info 'Importing and locally trusting the Omarchy repository signing key'
 sudo pacman-key --recv-keys "$OMARCHY_KEY_FINGERPRINT" --keyserver keys.openpgp.org
 sudo pacman-key --lsign-key "$OMARCHY_KEY_FINGERPRINT"
 
-# Put Omarchy first so packages it customizes (notably Quickshell) do not get
-# silently replaced by a same-named CachyOS package. CachyOS remains the source
-# for packages Omarchy does not publish, including Hyprland.
-info 'Adding the Omarchy repository before the existing CachyOS repositories'
+# CachyOS stays the default repository so its optimized builds keep being
+# used. The pin repository is placed before it only for deliberate overrides,
+# and [omarchy] goes last to supply the packages CachyOS does not publish.
+info 'Configuring repositories: CachyOS default, Omarchy last, pin repository first'
 PACMAN_CONF_CHANGED=true
-temporary_conf=$(mktemp)
-awk -v server="$OMARCHY_REPO" '
-  function print_omarchy_repo() {
-    print "[omarchy]"
-    print "SigLevel = Required DatabaseOptional"
-    print "Server = " server
-    print ""
-  }
-  /^\[[^]]+\]/ && $0 != "[options]" && !inserted {
-    print_omarchy_repo()
-    inserted = 1
-  }
-  { print }
-  END {
-    if (!inserted) print_omarchy_repo()
-  }
-' "$PACMAN_CONF" >"$temporary_conf" || die 'Could not prepare pacman configuration.'
-sudo install -m 644 -o root -g root "$temporary_conf" "$PACMAN_CONF"
-rm -f -- "$temporary_conf"
-
-repo_order=$(pacman-conf --repo-list) || die 'Could not read the configured pacman repository order.'
-first_repo=$(awk 'NF { print; exit }' <<<"$repo_order")
-[[ $first_repo == omarchy ]] || die 'Omarchy is not the first enabled pacman repository; restoring the previous pacman configuration.'
+install_version_guard
+write_version_guard_pacman_conf
 
 configure_limine_update_compatibility
 
@@ -801,10 +936,15 @@ else
   sudo pacman -Syu --needed --ask=4 "${pacman_args[@]}" omarchy
 fi
 
-PACMAN_CONF_CHANGED=false
 installed_omarchy=$(pacman -Q "$package_name" 2>/dev/null | awk '{print $2}')
 [[ -n $installed_omarchy ]] || die "Package $package_name was not found after the package transaction."
 info "Installed Omarchy package version: $package_name $installed_omarchy"
+
+# Now that the final repo order is active, pin anything installed at a newer
+# version than the CachyOS candidate. Doing this earlier would compare against
+# Omarchy's candidate and leave the next update printing warnings.
+run_version_guard
+PACMAN_CONF_CHANGED=false
 
 if ! rebuild_limine_boot_files; then
   die 'Limine boot-file preparation did not complete. Do not reboot until the reported issue is fixed.'

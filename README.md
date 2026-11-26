@@ -2,7 +2,9 @@
 
 An unofficial installer and integration tool for Omarchy on an existing CachyOS x86_64 system. It uses Omarchy's official edge packages (`omarchy-dev`) to keep rolling CachyOS and Arch packages synchronized; it is **not** an official Omarchy installer or a replacement for its ISO.
 
-The installer prefers Omarchy packages when repositories overlap; CachyOS supplies packages Omarchy does not publish, including Hyprland. It performs a full system upgrade, installs Omarchy's base packages, backs up and applies user defaults, and provisions the session. If Limine is present, it selects a snapshot hook compatible with the initramfs, targets the existing CachyOS entry when available, rebuilds boot files, and stops on build errors. Relevant system config files are backed up. The installer does not downgrade already-installed packages just because repository priority changes.
+CachyOS stays the default package source so its optimized builds keep being used; `[omarchy]` is added last and supplies the packages it owns. The installer performs a full system upgrade, installs Omarchy's base packages, backs up and applies user defaults, and provisions the session. If Limine is present, it selects a snapshot hook compatible with the initramfs, targets the existing CachyOS entry when available, rebuilds boot files, and stops on build errors. Relevant system config files are backed up. The installer does not downgrade already-installed packages just because repository priority changes.
+
+A small version guard keeps the two repositories from drifting apart. Omarchy packages that must track its edge repository are upgraded when they fall behind, and packages deliberately installed at a version newer than the CachyOS candidate (for example Hyprland, to match Omarchy's titlebar plugin) are published in a local pin repository so pacman never downgrades them or prints `local (...) is newer than ...`. See [Version guard](#version-guard).
 
 ## Compatibility
 
@@ -56,7 +58,20 @@ The installer creates the Omarchy session entry; it does not replace an existing
 
 - Incomplete user setup: run `omarchy update`, then `git pull` and `./install-omarchy-on-cachyos.sh --apply-user-configs`.
 - Browser theme not updating: `./install-omarchy-on-cachyos.sh --sync-browser-theme`.
+- Package version warnings after `omarchy update`, or a lost pin repository: `./install-omarchy-on-cachyos.sh --apply-version-guard`. It keeps CachyOS first, rebuilds the pin repository, and reinstalls the post-update hook.
 - SDDM rejects the first login: `./install-omarchy-on-cachyos.sh --fix-sddm-first-login` (sets the username only; never enables autologin).
+
+## Version guard
+
+`omarchy update` runs `omarchy-cachyos-version-check` from a post-update hook. The guard:
+
+- upgrades a package from `[omarchy]` when its installed version is older than the published one (the `follow` policy, used by `hyprland-preview-share-picker`);
+- publishes any installed package that is newer than the first CachyOS/Arch candidate in a small local repository at `/var/lib/omarchy-on-cachyos/pins`, placed before CachyOS in `pacman.conf`. pacman then sees an equal version, stays quiet, and cannot downgrade it (the `pin` policy, used by `hyprland`);
+- leaves everything else to pacman, so CachyOS remains the default repository for Chromium, Quickshell, and other shared packages.
+
+The policy file is `/var/lib/omarchy-on-cachyos/version-check.conf`; each line is `<package> pin` or `<package> follow`. `pin` stops Omarchy from upgrading that package; it still receives CachyOS upgrades while versions match, and it is pinned only when a deliberately newer version is installed. `follow` lets Omarchy upgrade it. Add a line if you deliberately install another Omarchy package at a version newer than CachyOS's; remove it (or switch to `follow`) when you want it to track a repository again. After editing the file, run `omarchy-cachyos-version-check` once to rebuild the pin repository.
+
+`IgnorePkg` is not a substitute: pacman 7.1.0 emits the "local is newer than" warning before checking `IgnorePkg`. A pin repository is what makes the warning disappear without changing repository priority. Note that `omarchy-refresh-pacman` rewrites `pacman.conf` from upstream templates and drops the pin repository; rerun the installer or re-add the `[omarchy-cachyos-pins]` block if you use that command.
 
 ## Uninstallation
 
