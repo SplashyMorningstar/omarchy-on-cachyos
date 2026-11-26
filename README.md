@@ -4,7 +4,7 @@ An unofficial installer and integration tool for Omarchy on an existing CachyOS 
 
 CachyOS stays the default package source so its optimized builds keep being used; `[omarchy]` is added last and supplies the packages it owns. The installer performs a full system upgrade, installs Omarchy's base packages, backs up and applies user defaults, and provisions the session. If Limine is present, it selects a snapshot hook compatible with the initramfs, targets the existing CachyOS entry when available, rebuilds boot files, and stops on build errors. Relevant system config files are backed up. The installer does not downgrade already-installed packages just because repository priority changes.
 
-A small version guard keeps the two repositories from drifting apart. Omarchy packages that must track its edge repository are upgraded when they fall behind, and packages deliberately installed at a version newer than the CachyOS candidate (for example Hyprland, to match Omarchy's titlebar plugin) are published in a local pin repository so pacman never downgrades them or prints `local (...) is newer than ...`. See [Version guard](#version-guard).
+A small version guard keeps the two repositories from drifting apart. Omarchy packages that must track its edge repository are upgraded when they fall behind, and packages deliberately installed at a version newer than the CachyOS candidate (for example Hyprland, to match Omarchy's titlebar plugin) are published in a local pin repository so pacman never downgrades them or prints `local (...) is newer than ...`. The installer installs and updates that guard automatically at `/usr/local/bin/omarchy-cachyos-version-check`; it runs after every `omarchy update`. See [Version guard](#version-guard).
 
 ## Compatibility
 
